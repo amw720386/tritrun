@@ -1,9 +1,11 @@
 // tritrun: a CUDA decode engine for PTQ1_0 (ternary, group-128) Bonsai 2.5 27B.
 //
-// The trits are evaluated with per-byte lookup tables in shared memory (the T-MAC idea on a GPU):
-// for each 128-column group a block builds 26 tables of partial sums of the quantised activation,
-// and then every 5-trit byte costs one table read.  Activations are quantised to 12 bits per group,
-// the in-group dot product is exact in int32, and the float scales are applied per group.
+// Matrix-vector products: each 128-weight block is decoded once per row (multiply-by-3 digit steps on
+// bytes held in 16-bit lanes), and every digit word is dotted with the int8 activations of 1..K tokens
+// (dp4a).  Activations are quantised per 32 elements, as in the reference fork, so the in-group sums are
+// exact integers.  K tokens share one read of the weights, which is what makes MTP verification cheap on
+// bandwidth-bound cards.  Recurrent state (conv + gated delta net) is double-buffered so a rejected draft
+// rolls back by replaying recorded inputs instead of storing per-token snapshots.
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <cstdio>
@@ -25,7 +27,6 @@ typedef uint32_t u32;
 static const int CH = 1024;            // rows per chunk
 static const int KREC = 4;             // tokens per step that can be rolled back
 static const int KMAX = 8;           // tokens per step (prefill width; wider spills registers)
-static const int QMAX = 2047;         // activation quantisation level (12 bits)
 static const int D_MODEL = 5120, D_INNER = 6144, D_FF = 17408;
 static const int QKV = 10240, GATE96 = 96;
 
