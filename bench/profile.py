@@ -29,7 +29,7 @@ def body(gpu, prof, flags=""):
     print(f"{gpu} prof={prof} K=1: {dt/n*1e3:.2f} ms/token = {n/dt:.2f} tok/s", flush=True)
     if prof: lib.tr_prof_dump(n)
     # K-token steps (verification width): time per step, not per token
-    for K in (4,):
+    for K in (2, 4, 8):
         bufk = (ctypes.c_float * (248320 * K))()
         pos = 200
         def step(p, want):

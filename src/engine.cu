@@ -22,12 +22,7 @@ typedef uint32_t u32;
 
 #define CK(x) do { cudaError_t _e = (x); if (_e != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #x, __FILE__, __LINE__, cudaGetErrorString(_e)); abort(); } } while (0)
 
-#ifndef MVM_NT
-#define MVM_NT 512
-#endif
-static const int NT = MVM_NT;         // threads per mvm block
-static const int RPT = 1024 / MVM_NT;              // rows per thread
-static const int CH = NT * RPT;       // rows per chunk (1024)
+static const int CH = 1024;            // rows per chunk
 static const int KREC = 4;             // tokens per step that can be rolled back
 static const int KMAX = 8;           // tokens per step (prefill width; wider spills registers)
 static const int QMAX = 2047;         // activation quantisation level (12 bits)
@@ -166,10 +161,15 @@ __global__ void sumsq_kernel(const float* x, int n, ssq_t* irms) {
 // ---------------------------------------------------------------------------------------------
 #define DIGIT_STEP(lo, hi, D) { const u32 t1_ = (lo) * 3u, t2_ = (hi) * 3u; (lo) = t1_ & 0x00FF00FFu; (hi) = t2_ & 0x00FF00FFu; D = __byte_perm(t1_, t2_, 0x7531); }
 
-template <int K>
+template <int K, int NT>
 __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
                                                     int G, int cols, int parts, int yrows) {
-    __shared__ u32 sA[K * (K > 8 ? 10 : (K > 4 ? 20 : 40)) * 32];
+    constexpr int RPT = CH / NT;
+    // activation records of this block's groups, 16-byte aligned so the 4 words of a digit step come from one 128-bit load
+    constexpr int GL = K > 8 ? 10 : (K > 4 ? 20 : 40);
+    __shared__ __align__(16) u32 sA[K * GL * 32];
+    __shared__ float sds[K * GL * 4];
+    __shared__ int   sss[K * GL * 4];
     const int chunk = blockIdx.x, part = blockIdx.y, tid = threadIdx.x;
     const int g0 = (int) ((long long) part * G / parts), g1 = (int) ((long long) (part + 1) * G / parts);
     const int Gp = g1 - g0;
@@ -177,6 +177,11 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
     for (int i = tid; i < K * Gp * 32; i += NT) {
         const int k = i / (Gp * 32), r = i - k * Gp * 32;
         sA[i] = Au[(size_t) (k * G + g0) * 32 + r];
+    }
+    for (int i = tid; i < K * Gp * 4; i += NT) {
+        const int k = i / (Gp * 4), r = i - k * Gp * 4;
+        sds[i] = d8[(size_t) (k * G + g0) * 4 + r];
+        sss[i] = sa[(size_t) (k * G + g0) * 4 + r];
     }
     __syncthreads();
 
@@ -199,54 +204,77 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
 #pragma unroll
         for (int k = 0; k < K; ++k)
 #pragma unroll
-            for (int q = 0; q < 4; ++q) { ds[k][q] = d8[(size_t) (k * G + g) * 4 + q]; ss[k][q] = sa[(size_t) (k * G + g) * 4 + q]; }
+            for (int q = 0; q < 4; ++q) { ds[k][q] = sds[(k * Gp + gi) * 4 + q]; ss[k][q] = sss[(k * Gp + gi) * 4 + q]; }
 
+        int isum[RPT][K][4];
 #pragma unroll
-        for (int j = 0; j < RPT; ++j) {
-            int isum[K][4];
+        for (int j = 0; j < RPT; ++j)
 #pragma unroll
             for (int k = 0; k < K; ++k)
 #pragma unroll
-                for (int q = 0; q < 4; ++q) isum[k][q] = 0;
-            u32 lo[4], hi[4];
+                for (int q = 0; q < 4; ++q) isum[j][k][q] = 0;
+        u32 lo[RPT][4], hi[RPT][4], l2[RPT][2], h2[RPT][2];
 #pragma unroll
-            for (int q = 0; q < 4; ++q) { lo[q] = w[j][q] & 0x00FF00FFu; hi[q] = (w[j][q] >> 8) & 0x00FF00FFu; }
+        for (int j = 0; j < RPT; ++j) {
 #pragma unroll
-            for (int n = 0; n < 5; ++n) {
+            for (int q = 0; q < 4; ++q) { lo[j][q] = w[j][q] & 0x00FF00FFu; hi[j][q] = (w[j][q] >> 8) & 0x00FF00FFu; }
+#pragma unroll
+            for (int q = 0; q < 2; ++q) { l2[j][q] = w[j][4 + q] & 0x00FF00FFu; h2[j][q] = (w[j][4 + q] >> 8) & 0x00FF00FFu; }
+        }
+        // bytes 0..15: 5 digit steps of 16 elements; one 128-bit activation load per token and step
+#pragma unroll
+        for (int n = 0; n < 5; ++n) {
+            uint4 a4[K];
+#pragma unroll
+            for (int k = 0; k < K; ++k) a4[k] = ((const uint4*) sA)[(k * Gp + gi) * 8 + n];
+#pragma unroll
+            for (int j = 0; j < RPT; ++j) {
 #pragma unroll
                 for (int q = 0; q < 4; ++q) {
-                    u32 D; DIGIT_STEP(lo[q], hi[q], D)
-#pragma unroll
-                    for (int k = 0; k < K; ++k) isum[k][n >> 1] = __dp4a((int) D, (int) sA[k * Gp * 32 + gi * 32 + n * 4 + q], isum[k][n >> 1]);
-                }
-            }
-            u32 l2[2], h2[2];
-#pragma unroll
-            for (int q = 0; q < 2; ++q) { l2[q] = w[j][4 + q] & 0x00FF00FFu; h2[q] = (w[j][4 + q] >> 8) & 0x00FF00FFu; }
-#pragma unroll
-            for (int n = 0; n < 5; ++n) {
-                const int sb = n < 2 ? 2 : 3;
-#pragma unroll
-                for (int q = 0; q < 2; ++q) {
-                    u32 D; DIGIT_STEP(l2[q], h2[q], D)
-#pragma unroll
-                    for (int k = 0; k < K; ++k) isum[k][sb] = __dp4a((int) D, (int) sA[k * Gp * 32 + gi * 32 + 20 + n * 2 + q], isum[k][sb]);
-                }
-            }
-            {
-                u32 v = (w[j][6] & 0xFFu) | ((w[j][6] & 0xFF00u) << 8);
-#pragma unroll
-                for (int n = 0; n < 4; ++n) {
-                    const u32 t = v * 3u;
-                    const int d24 = (t >> 8) & 3, d25 = (t >> 24) & 3;
-                    v = t & 0x00FF00FFu;
-                    const int sh = 8 * ((2 * n) & 3);
+                    u32 D; DIGIT_STEP(lo[j][q], hi[j][q], D)
 #pragma unroll
                     for (int k = 0; k < K; ++k) {
-                        const u32 aw = sA[k * Gp * 32 + gi * 32 + 30 + (n >> 1)];
-                        const int a0 = (int) (signed char) (aw >> sh), a1 = (int) (signed char) (aw >> (sh + 8));
-                        isum[k][3] += d24 * a0 + d25 * a1;
+                        const u32 aw = q == 0 ? a4[k].x : (q == 1 ? a4[k].y : (q == 2 ? a4[k].z : a4[k].w));
+                        isum[j][k][n >> 1] = __dp4a((int) D, (int) aw, isum[j][k][n >> 1]);
                     }
+                }
+            }
+        }
+        // bytes 16..23: 5 digit steps of 8 elements; 64-bit loads
+#pragma unroll
+        for (int n = 0; n < 5; ++n) {
+            const int sb = n < 2 ? 2 : 3;
+            uint2 a2[K];
+#pragma unroll
+            for (int k = 0; k < K; ++k) a2[k] = ((const uint2*) sA)[(k * Gp + gi) * 16 + 10 + n];
+#pragma unroll
+            for (int j = 0; j < RPT; ++j) {
+#pragma unroll
+                for (int q = 0; q < 2; ++q) {
+                    u32 D; DIGIT_STEP(l2[j][q], h2[j][q], D)
+#pragma unroll
+                    for (int k = 0; k < K; ++k) isum[j][k][sb] = __dp4a((int) D, (int) (q == 0 ? a2[k].x : a2[k].y), isum[j][k][sb]);
+                }
+            }
+        }
+        // bytes 24, 25: 4 digits each -> elements 120 + 2n, 121 + 2n (words 30, 31)
+        uint2 a3[K];
+#pragma unroll
+        for (int k = 0; k < K; ++k) a3[k] = ((const uint2*) sA)[(k * Gp + gi) * 16 + 15];
+#pragma unroll
+        for (int j = 0; j < RPT; ++j) {
+            u32 v = (w[j][6] & 0xFFu) | ((w[j][6] & 0xFF00u) << 8);
+#pragma unroll
+            for (int n = 0; n < 4; ++n) {
+                const u32 t = v * 3u;
+                const int d24 = (t >> 8) & 3, d25 = (t >> 24) & 3;
+                v = t & 0x00FF00FFu;
+                const int sh = 8 * ((2 * n) & 3);
+#pragma unroll
+                for (int k = 0; k < K; ++k) {
+                    const u32 aw = (n >> 1) == 0 ? a3[k].x : a3[k].y;
+                    const int a0 = (int) (signed char) (aw >> sh), a1 = (int) (signed char) (aw >> (sh + 8));
+                    isum[j][k][3] += d24 * a0 + d25 * a1;
                 }
             }
             const float dh = __half2float(__ushort_as_half((unsigned short) (w[j][6] >> 16)));
@@ -254,7 +282,7 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
             for (int k = 0; k < K; ++k) {
                 float f = 0;
 #pragma unroll
-                for (int q = 0; q < 4; ++q) f += ds[k][q] * (float) (isum[k][q] - ss[k][q]);
+                for (int q = 0; q < 4; ++q) f += ds[k][q] * (float) (isum[j][k][q] - ss[k][q]);
                 acc[j][k] += dh * f;
             }
         }
@@ -750,11 +778,11 @@ struct Engine {
     // column partitions used for K tokens (wider steps allow fewer groups per block because shared memory holds K activation records)
     int eff_parts(const Mvm& m, int K) const { const int G = m.cols / 128; const int lim = K > 8 ? 10 : (K > 4 ? 20 : 40); return std::min(G, std::max(m.parts, (G + lim - 1) / lim)); }
     void launch_mvm(const u32* w, float* y, int K, int G, int cols, int parts, int yrows, dim3 grid) {
-        if (K == 1) mvm_kernel<1><<<grid, NT, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
-        else if (K == 2) mvm_kernel<2><<<grid, NT, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
-        else if (K <= 4) mvm_kernel<4><<<grid, NT, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
-        else if (K <= 8) mvm_kernel<8><<<grid, NT, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
-        else mvm_kernel<16><<<grid, NT, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
+        if (K == 1) mvm_kernel<1, 512><<<grid, 512, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
+        else if (K == 2) mvm_kernel<2, 512><<<grid, 512, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
+        else if (K <= 4) mvm_kernel<4, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
+        else if (K <= 8) mvm_kernel<8, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
+        else mvm_kernel<16, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
     }
     void mvm(Mvm& m, int K) {
         const int G = m.cols / 128;
@@ -873,7 +901,7 @@ struct Engine {
         vec_add_kernel<<<(D_MODEL + 255) / 256, 256, 0, st>>>(m.y1, m.y2, m.y2, D_MODEL);
         slot_norm(e, m.y2, m.slots + 4, m.head_norm, m.h_next, D_MODEL);
         prep(0, m.y2, D_MODEL, D_MODEL, 0, 0, signs[0], m.head_norm, 0, nullptr, 1, m.slots + 4);
-        mvm_kernel<1><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, A, d8, sa, m.y_logits, 40, D_MODEL, 1, out.yrows);
+        mvm_kernel<1, 512><<<dim3(out.chunks, 1), 512, 0, st>>>(out.w, A, d8, sa, m.y_logits, 40, D_MODEL, 1, out.yrows);
         argmax_gpu(m.y_logits, 1, out.yrows);
         sync();
         return argmax_tok(am_host[0]);
