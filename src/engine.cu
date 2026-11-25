@@ -23,7 +23,7 @@ typedef uint32_t u32;
 #define CK(x) do { cudaError_t _e = (x); if (_e != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #x, __FILE__, __LINE__, cudaGetErrorString(_e)); abort(); } } while (0)
 
 #ifndef MVM_NT
-#define MVM_NT 256
+#define MVM_NT 512
 #endif
 static const int NT = MVM_NT;         // threads per mvm block
 static const int RPT = 1024 / MVM_NT;              // rows per thread
@@ -60,20 +60,37 @@ __device__ __forceinline__ int trit_elem(int b, int n) {
 struct PrepArgs {
     const float* src; const float* irms; const float* w; const float* signs;
     const float* yp; int parts; int yrows; int upoff;
-    int n; int ncols;
-    short* X; float* xs;
+    int n; int G;
+    signed char* A; float* d8; int* sa;     // A [k][G][128] int8 planes, d8 [k][G][4] sub-block scales, sa [k][G][4] sub-block sums
 };
+
+// byte position inside the 128-byte activation record of one group: words permuted to match the trit decode order
+__device__ __forceinline__ int plane_slot(int e) {
+    if (e < 80) {                                   // 5 steps x 16 elements: word n*4+j, byte lane perm {0,2,1,3}
+        const int n = e >> 4, j = (e & 15) >> 2, l = e & 3;
+        const int lane = l == 1 ? 2 : (l == 2 ? 1 : l);
+        return (n * 4 + j) * 4 + lane;
+    }
+    if (e < 120) {                                  // 5 steps x 8 elements
+        const int n = (e - 80) >> 3, r = (e - 80) & 7, j = r >> 2, l = r & 3;
+        const int lane = l == 1 ? 2 : (l == 2 ? 1 : l);
+        return (20 + n * 2 + j) * 4 + lane;
+    }
+    return 30 * 4 + (e - 120);                      // last 8 elements in natural order (words 30, 31)
+}
 
 __global__ void prep_kernel(const PrepArgs a, const int mode) {
     __shared__ float s[1024];
-    __shared__ float gm[8];
+    __shared__ float mx[32];
+    __shared__ int   sm[32];
     const int k = blockIdx.y, seg = blockIdx.x, tid = threadIdx.x;
     const int base = seg * 1024;
+    const float ir = mode == 0 ? 1.0f / sqrtf(a.irms[k] / a.n + 1e-6f) : 1.0f;
     for (int e = tid; e < 1024; e += 256) {
         const int i = base + e;
         float v;
         if (mode == 0) {
-            v = a.src[(size_t) k * a.n + i] * a.irms[k] * a.w[i];
+            v = a.src[(size_t) k * a.n + i] * ir * a.w[i];
         } else if (mode == 1) {
             float g = 0, u = 0;
             for (int p = 0; p < a.parts; ++p) {
@@ -100,17 +117,24 @@ __global__ void prep_kernel(const PrepArgs a, const int mode) {
         }
         __syncthreads();
     }
-    if (tid < 8) gm[tid] = 0.0f;
+    if (tid < 32) { mx[tid] = 0.0f; sm[tid] = 0; }
     __syncthreads();
     for (int e = tid; e < 1024; e += 256)
-        atomicMax((int*) &gm[e >> 7], __float_as_int(fabsf(s[e]) * 0.03125f));
+        atomicMax((int*) &mx[e >> 5], __float_as_int(fabsf(s[e]) * 0.03125f));
     __syncthreads();
     for (int e = tid; e < 1024; e += 256) {
-        const float m = gm[e >> 7];
-        const float q = m > 0 ? (s[e] * 0.03125f) * ((float) QMAX / m) : 0.0f;
-        a.X[(size_t) k * a.ncols + base + e] = (short) lrintf(q);
+        const int g = e >> 7, el = e & 127;
+        const float m = mx[e >> 5];
+        const int q = m > 0 ? (int) lrintf((s[e] * 0.03125f) * (127.0f / m)) : 0;
+        a.A[((size_t) (k * a.G + base / 128 + g)) * 128 + plane_slot(el)] = (signed char) q;
+        atomicAdd(&sm[e >> 5], q);
     }
-    if (tid < 8) a.xs[(size_t) k * (a.ncols / 128) + seg * 8 + tid] = gm[tid] / (float) QMAX;
+    __syncthreads();
+    if (tid < 32) {
+        const int gg = base / 128 + (tid >> 2);
+        a.d8[(size_t) (k * a.G + gg) * 4 + (tid & 3)] = mx[tid] / 127.0f;
+        a.sa[(size_t) (k * a.G + gg) * 4 + (tid & 3)] = sm[tid];
+    }
 }
 
 // inverse RMS of the residual vector, one value per token
@@ -124,99 +148,113 @@ __global__ void sumsq_kernel(const float* x, int n, float* irms) {
     __syncthreads();
     if (threadIdx.x == 0) {
         float t = 0; for (int i = 0; i < 8; ++i) t += part[i];
-        irms[k] = 1.0f / sqrtf(t / n + 1e-6f);
+        irms[k] = t;
     }
 }
 
 // ---------------------------------------------------------------------------------------------
-// lookup-table matrix-vector product.  W layout: [chunk][G][7 words][1024 rows] (see gguf words per 128-weight block)
+// ternary matrix-vector product: decode the trits once per row, then one integer dot per token.
+// W layout: [chunk][G][7 words][1024 rows] (the raw 28-byte PTQ1_0 block as 7 little-endian words).
+// Digit step: multiply by 3 on bytes held in 16-bit lanes; the resulting digit word has byte order
+// (b0, b2, b1, b3), and prep stores the activation planes in the same order.
 // Y layout: [token k][part][yrows]
 // ---------------------------------------------------------------------------------------------
-#ifdef NOSYNC
-#define MVM_SYNC()
-#else
-#define MVM_SYNC() __syncthreads()
-#endif
+#define DIGIT_STEP(lo, hi, D) { const u32 t1_ = (lo) * 3u, t2_ = (hi) * 3u; (lo) = t1_ & 0x00FF00FFu; (hi) = t2_ & 0x00FF00FFu; D = __byte_perm(t1_, t2_, 0x7531); }
+
 template <int K>
-__global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const short* X, const float* xs, float* Y,
-                                                     int G, int cols, int parts, int yrows) {
-    __shared__ short T[K * 26 * 256];
+__global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
+                                                    int G, int cols, int parts, int yrows) {
+    __shared__ u32 sA[K * 40 * 32];
     const int chunk = blockIdx.x, part = blockIdx.y, tid = threadIdx.x;
     const int g0 = (int) ((long long) part * G / parts), g1 = (int) ((long long) (part + 1) * G / parts);
+    const int Gp = g1 - g0;
+    const u32* Au = (const u32*) A;
+    for (int i = tid; i < K * Gp * 32; i += NT) {
+        const int k = i / (Gp * 32), r = i - k * Gp * 32;
+        sA[i] = Au[(size_t) (k * G + g0) * 32 + r];
+    }
+    __syncthreads();
+
     float acc[RPT][K];
 #pragma unroll
     for (int j = 0; j < RPT; ++j)
 #pragma unroll
         for (int k = 0; k < K; ++k) acc[j][k] = 0.0f;
     const u32* Wc = W + (size_t) chunk * G * 7 * CH;
-    u32 w[RPT][7], wn[RPT][7];
-    if (g0 < g1) {
-        const u32* Wg = Wc + (size_t) g0 * 7 * CH;
+
+    for (int g = g0; g < g1; ++g) {
+        const u32* Wg = Wc + (size_t) g * 7 * CH;
+        u32 w[RPT][7];
 #pragma unroll
         for (int j = 0; j < RPT; ++j)
 #pragma unroll
             for (int q = 0; q < 7; ++q) w[j][q] = Wg[q * CH + tid + j * NT];
-    }
-
-    for (int g = g0; g < g1; ++g) {
-        const bool have_next = g + 1 < g1;
-        // issue the NEXT group's weight loads now: they run while this group's tables are built and read
-        if (have_next) {
-            const u32* Wn = Wc + (size_t) (g + 1) * 7 * CH;
+        const int gi = g - g0;
+        float ds[K][4]; int ss[K][4];
 #pragma unroll
-            for (int j = 0; j < RPT; ++j)
+        for (int k = 0; k < K; ++k)
 #pragma unroll
-                for (int q = 0; q < 7; ++q) wn[j][q] = Wn[q * CH + tid + j * NT];
-        }
+            for (int q = 0; q < 4; ++q) { ds[k][q] = d8[(size_t) (k * G + g) * 4 + q]; ss[k][q] = sa[(size_t) (k * G + g) * 4 + q]; }
 
-#ifndef NOBUILD
-        if (tid < 234) {
-            const int b = tid / 9, r = tid - b * 9;
-            const int d0 = r / 3, d1 = r - d0 * 3;
+#pragma unroll
+        for (int j = 0; j < RPT; ++j) {
+            int isum[K][4];
+#pragma unroll
+            for (int k = 0; k < K; ++k)
+#pragma unroll
+                for (int q = 0; q < 4; ++q) isum[k][q] = 0;
+            u32 lo[4], hi[4];
+#pragma unroll
+            for (int q = 0; q < 4; ++q) { lo[q] = w[j][q] & 0x00FF00FFu; hi[q] = (w[j][q] >> 8) & 0x00FF00FFu; }
+#pragma unroll
+            for (int n = 0; n < 5; ++n) {
+#pragma unroll
+                for (int q = 0; q < 4; ++q) {
+                    u32 D; DIGIT_STEP(lo[q], hi[q], D)
+#pragma unroll
+                    for (int k = 0; k < K; ++k) isum[k][n >> 1] = __dp4a((int) D, (int) sA[k * Gp * 32 + gi * 32 + n * 4 + q], isum[k][n >> 1]);
+                }
+            }
+            u32 l2[2], h2[2];
+#pragma unroll
+            for (int q = 0; q < 2; ++q) { l2[q] = w[j][4 + q] & 0x00FF00FFu; h2[q] = (w[j][4 + q] >> 8) & 0x00FF00FFu; }
+#pragma unroll
+            for (int n = 0; n < 5; ++n) {
+                const int sb = n < 2 ? 2 : 3;
+#pragma unroll
+                for (int q = 0; q < 2; ++q) {
+                    u32 D; DIGIT_STEP(l2[q], h2[q], D)
+#pragma unroll
+                    for (int k = 0; k < K; ++k) isum[k][sb] = __dp4a((int) D, (int) sA[k * Gp * 32 + gi * 32 + 20 + n * 2 + q], isum[k][sb]);
+                }
+            }
+            {
+                u32 v = (w[j][6] & 0xFFu) | ((w[j][6] & 0xFF00u) << 8);
+#pragma unroll
+                for (int n = 0; n < 4; ++n) {
+                    const u32 t = v * 3u;
+                    const int d24 = (t >> 8) & 3, d25 = (t >> 24) & 3;
+                    v = t & 0x00FF00FFu;
+                    const int sh = 8 * ((2 * n) & 3);
+#pragma unroll
+                    for (int k = 0; k < K; ++k) {
+                        const u32 aw = sA[k * Gp * 32 + gi * 32 + 30 + (n >> 1)];
+                        const int a0 = (int) (signed char) (aw >> sh), a1 = (int) (signed char) (aw >> (sh + 8));
+                        isum[k][3] += d24 * a0 + d25 * a1;
+                    }
+                }
+            }
+            const float dh = __half2float(__ushort_as_half((unsigned short) (w[j][6] >> 16)));
 #pragma unroll
             for (int k = 0; k < K; ++k) {
-                const short* xk = X + (size_t) k * cols + g * 128;
-                int x[5];
+                float f = 0;
 #pragma unroll
-                for (int n = 0; n < 5; ++n) x[n] = (b >= 24 && n == 4) ? 0 : xk[trit_elem(b, n)];
-                const int R = (d0 - 1) * x[0] + (d1 - 1) * x[1];
-                for (int lo = 0; lo < 27; ++lo) {
-                    const int e2 = lo / 9, e3 = (lo / 3) % 3, e4 = lo % 3;
-                    const int q = r * 27 + lo;
-                    const int code = (q * 256 + 242) / 243;      // the file's byte encoding of 5 trits
-                    T[k * 26 * 256 + b * 256 + code] = (short) (R + (e2 - 1) * x[2] + (e3 - 1) * x[3] + (e4 - 1) * x[4]);
-                }
+                for (int q = 0; q < 4; ++q) f += ds[k][q] * (float) (isum[k][q] - ss[k][q]);
+                acc[j][k] += dh * f;
             }
-        }
-#endif
-        MVM_SYNC();
-#pragma unroll
-        for (int k = 0; k < K; ++k) {
-            const float xsg = xs[(size_t) k * G + g];
-#pragma unroll
-            for (int j = 0; j < RPT; ++j) {
-                int isum = 0;
-#ifndef NOLOOK
-#pragma unroll
-                for (int b = 0; b < 26; ++b) {
-                    const u32 byte = (w[j][b >> 2] >> (8 * (b & 3))) & 0xFFu;
-                    isum += T[k * 26 * 256 + b * 256 + byte];
-                }
-#else
-                isum = w[j][0] ^ w[j][1] ^ w[j][2] ^ w[j][3] ^ w[j][4] ^ w[j][5] ^ w[j][6];
-#endif
-                const half dh = __ushort_as_half((unsigned short) (w[j][6] >> 16));
-                acc[j][k] += __half2float(dh) * xsg * (float) isum;
-            }
-        }
-        MVM_SYNC();
-        if (have_next) {
-#pragma unroll
-            for (int j = 0; j < RPT; ++j)
-#pragma unroll
-                for (int q = 0; q < 7; ++q) w[j][q] = wn[j][q];
         }
     }
+#pragma unroll
     for (int k = 0; k < K; ++k)
 #pragma unroll
         for (int j = 0; j < RPT; ++j)
@@ -226,22 +264,28 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const short* X
 // ---------------------------------------------------------------------------------------------
 // x[k][i] += sum over parts of y[k][part][off + i]
 // ---------------------------------------------------------------------------------------------
-__global__ void addres_kernel(float* x, const float* yp, int n, int parts, int yrows, int off) {
+__global__ void addres_kernel(float* x, const float* yp, int n, int parts, int yrows, int off, float* ssq) {
     const int k = blockIdx.y;
+    float acc = 0;
     for (int i = blockIdx.x * 256 + threadIdx.x; i < n; i += gridDim.x * 256) {
         float t = 0;
         for (int p = 0; p < parts; ++p) t += yp[(size_t) (k * parts + p) * yrows + off + i];
-        x[(size_t) k * n + i] += t;
+        const float v = x[(size_t) k * n + i] + t;
+        x[(size_t) k * n + i] = v;
+        acc += v * v;
     }
+    acc = warp_sum(acc);
+    if ((threadIdx.x & 31) == 0) atomicAdd(ssq + k, acc);
 }
 
 // F32 beta / alpha gate projections of the RMS-normalised activation
-__global__ void gate_kernel(const float* x, const float* irms, const float* nw, const float* wb, const float* wa, float* out) {
+__global__ void gate_kernel(const float* x, const float* ssq, const float* nw, const half* wb, const half* wa, float* out) {
     __shared__ float part[8];
     const int k = blockIdx.y, row = blockIdx.x;
-    const float* W = row < 48 ? wb + (size_t) row * D_MODEL : wa + (size_t) (row - 48) * D_MODEL;
+    const float ir = 1.0f / sqrtf(ssq[k] / D_MODEL + 1e-6f);
+    const half* W = row < 48 ? wb + (size_t) row * D_MODEL : wa + (size_t) (row - 48) * D_MODEL;
     float acc = 0;
-    for (int e = threadIdx.x; e < D_MODEL; e += 256) acc += W[e] * (x[(size_t) k * D_MODEL + e] * irms[k] * nw[e]);
+    for (int e = threadIdx.x; e < D_MODEL; e += 256) acc += __half2float(W[e]) * (x[(size_t) k * D_MODEL + e] * ir * nw[e]);
     acc = warp_sum(acc);
     if ((threadIdx.x & 31) == 0) part[threadIdx.x >> 5] = acc;
     __syncthreads();
@@ -410,11 +454,16 @@ struct Layer {
     float* attn_norm = nullptr; float* post_norm = nullptr;
     float* qnorm = nullptr; float* knorm = nullptr;                       // attention layers
     float* ssm_norm = nullptr; float* dt_bias = nullptr; float* ssm_a = nullptr; float* conv_k = nullptr;
-    float* wb = nullptr; float* wa = nullptr; float* conv_state = nullptr; float* gdn_state = nullptr;
+    half* wb = nullptr; half* wa = nullptr; float* conv_state = nullptr; float* gdn_state = nullptr;
     half* kc = nullptr; half* vc = nullptr;
     bool recr = false;
 };
 
+static half* upload_half(const std::vector<float>& v) {
+    std::vector<half> h(v.size());
+    for (size_t i = 0; i < v.size(); ++i) h[i] = __float2half(v[i]);
+    half* d; CK(cudaMalloc(&d, v.size() * sizeof(half))); CK(cudaMemcpy(d, h.data(), v.size() * sizeof(half), cudaMemcpyHostToDevice)); return d;
+}
 static float* upload_f32(const void* src, size_t n) {
     float* d; CK(cudaMalloc(&d, n * sizeof(float))); CK(cudaMemcpy(d, src, n * sizeof(float), cudaMemcpyHostToDevice)); return d;
 }
@@ -440,10 +489,12 @@ struct Engine {
     float* out_norm = nullptr; float* signs[3] = {nullptr, nullptr, nullptr};   // 5120, 6144, 17408
     std::vector<float> sign_host[3];
     // scratch
-    float* rx = nullptr; float* irms = nullptr; short* X = nullptr; float* xs = nullptr;
+    float* rx = nullptr; float* irms = nullptr; signed char* A = nullptr; float* d8 = nullptr; int* sa = nullptr;
     float* ybuf = nullptr; float* y_logits = nullptr; float* qkv = nullptr; float* gout = nullptr; float* gated = nullptr; float* Q = nullptr; float* gate = nullptr; float* attn_out = nullptr; float* g_raw = nullptr;
     float* emb_host = nullptr;                       // pinned [KMAX][5120]
     cudaStream_t st = nullptr;
+    float* ssq = nullptr;                            // [2*64+2][KMAX] sums of squares, one slot per norm input
+    float* slot(int s) { return ssq + (size_t) s * KMAX; }
     float rope_base = 1e7f;
     size_t dev_bytes = 0;
 
@@ -508,7 +559,7 @@ struct Engine {
                 load_mvm(y.A, { T("attn_qkv.weight"), T("attn_gate.weight") }, 1);
                 load_mvm(y.B, { T("ssm_out.weight") }, 1);
                 y.ssm_norm = upn(T("ssm_norm.weight")); y.dt_bias = upn(T("ssm_dt.bias")); y.ssm_a = upn(T("ssm_a")); y.conv_k = upn(T("ssm_conv1d.weight"));
-                y.wb = upn(T("ssm_beta.weight")); y.wa = upn(T("ssm_alpha.weight"));
+                y.wb = upload_half(to_f32(*T("ssm_beta.weight"))); y.wa = upload_half(to_f32(*T("ssm_alpha.weight"))); dev_bytes += 2 * (size_t) 48 * D_MODEL * 2;
                 CK(cudaMalloc(&y.conv_state, (size_t) 3 * QKV * 4)); CK(cudaMemset(y.conv_state, 0, (size_t) 3 * QKV * 4)); dev_bytes += (size_t) 3 * QKV * 4;
                 const size_t sbytes = (size_t) 48 * 128 * 128 * 4; CK(cudaMalloc(&y.gdn_state, sbytes)); CK(cudaMemset(y.gdn_state, 0, sbytes)); dev_bytes += sbytes;
             } else {
@@ -524,8 +575,8 @@ struct Engine {
         { auto v = to_f32(f.get("output_norm.weight")); out_norm = upload_f32(v.data(), v.size()); }
         load_mvm(out, { &f.get("output.weight") }, 1);
         n_vocab = out.rows;
-        rx = dalloc((size_t) KMAX * D_MODEL); irms = dalloc(KMAX); X = nullptr;
-        CK(cudaMalloc(&X, (size_t) KMAX * D_FF * sizeof(short))); xs = dalloc((size_t) KMAX * (D_FF / 128));
+        rx = dalloc((size_t) KMAX * D_MODEL); irms = dalloc(KMAX); ssq = dalloc((size_t) (2 * 64 + 2) * KMAX);
+        CK(cudaMalloc(&A, (size_t) KMAX * (D_FF / 128) * 128)); CK(cudaMalloc(&d8, (size_t) KMAX * (D_FF / 128) * 16)); CK(cudaMalloc(&sa, (size_t) KMAX * (D_FF / 128) * 16));
         { size_t mx = 0; for (auto& y : L) for (Mvm* m : { &y.A, &y.B, &y.C, &y.D }) mx = std::max(mx, (size_t) m->parts * m->yrows); ybuf = dalloc((size_t) KMAX * mx); fprintf(stderr, "partial buffer %zu floats/token, SMs %d\n", mx, n_sm); }
         y_logits = dalloc((size_t) KMAX * out.yrows);
         qkv = dalloc((size_t) KMAX * QKV); gout = dalloc((size_t) KMAX * D_INNER); gated = dalloc((size_t) KMAX * D_INNER);
@@ -560,30 +611,30 @@ struct Engine {
     }
 
     // --- launches ---
-    void prep(int mode, const float* src, int n, int ncols, int parts, int yrows, const float* sgn, const float* w, int upoff, const float* yp, int K) {
-        PrepArgs a; a.src = src; a.irms = irms; a.w = w; a.signs = sgn; a.yp = yp; a.parts = parts; a.yrows = yrows; a.upoff = upoff; a.n = n; a.ncols = ncols; a.X = X; a.xs = xs;
+    void prep(int mode, const float* src, int n, int ncols, int parts, int yrows, const float* sgn, const float* w, int upoff, const float* yp, int K, const float* ss = nullptr) {
+        PrepArgs a; a.src = src; a.irms = ss; a.w = w; a.signs = sgn; a.yp = yp; a.parts = parts; a.yrows = yrows; a.upoff = upoff; a.n = n; a.G = ncols / 128; a.A = A; a.d8 = d8; a.sa = sa;
         prep_kernel<<<dim3(n / 1024, K), 256, 0, st>>>(a, mode);
     }
     void mvm(Mvm& m, int K) {
         const int G = m.cols / 128;
         const dim3 grid(m.chunks, m.parts);
-        if (K == 1) mvm_kernel<1><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
-        else if (K == 2) mvm_kernel<2><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
-        else mvm_kernel<4><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
+        if (K == 1) mvm_kernel<1><<<grid, NT, 0, st>>>(m.w, A, d8, sa, ybuf, G, m.cols, m.parts, m.yrows);
+        else if (K == 2) mvm_kernel<2><<<grid, NT, 0, st>>>(m.w, A, d8, sa, ybuf, G, m.cols, m.parts, m.yrows);
+        else mvm_kernel<4><<<grid, NT, 0, st>>>(m.w, A, d8, sa, ybuf, G, m.cols, m.parts, m.yrows);
     }
-    void addres(Mvm& m, int K) {
-        addres_kernel<<<dim3((D_MODEL + 1023) / 1024, K), 256, 0, st>>>(rx, ybuf, D_MODEL, m.parts, m.yrows, 0);
+    void addres(Mvm& m, int K, float* ss) {
+        addres_kernel<<<dim3((D_MODEL + 1023) / 1024, K), 256, 0, st>>>(rx, ybuf, D_MODEL, m.parts, m.yrows, 0, ss);
     }
     void sumsq(int K) { sumsq_kernel<<<dim3(K), 256, 0, st>>>(rx, D_MODEL, irms); }
 
+#define P(name, ...) { PROF_BEGIN(st); __VA_ARGS__; PROF_END(st, name); }
     void layer(int il, int K, int pos) {
         Layer& y = L[il];
-#define P(name, ...) { PROF_BEGIN(st); __VA_ARGS__; PROF_END(st, name); }
-        P("sumsq", sumsq(K));
-        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.attn_norm, 0, nullptr, K));
+        float* sA = slot(2 * il); float* sP = slot(2 * il + 1); float* sN = slot(2 * il + 2);   // inputs of attn_norm, post_norm, next layer
+        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.attn_norm, 0, nullptr, K, sA));
         P("mvmA", mvm(y.A, K));
         if (y.recr) {
-            P("gate", (gate_kernel<<<dim3(96, K), 256, 0, st>>>(rx, irms, y.attn_norm, y.wb, y.wa, g_raw)));
+            P("gate", (gate_kernel<<<dim3(96, K), 256, 0, st>>>(rx, sA, y.attn_norm, y.wb, y.wa, g_raw)));
             P("convqk", (convqk_kernel<<<80, 128, 0, st>>>(ybuf, y.A.parts, y.A.yrows, y.conv_k, y.conv_state, qkv, K)));
             P("gdn", (gdn_kernel<<<dim3(48, 16), 256, 0, st>>>(qkv, g_raw, y.dt_bias, y.ssm_a, y.gdn_state, gout, K)));
             P("gdnpost", (gdnpost_kernel<<<dim3(48, K), 128, 0, st>>>(gout, y.ssm_norm, ybuf, y.A.parts, y.A.yrows, gated)));
@@ -594,27 +645,27 @@ struct Engine {
             P("prep_wo", prep(3, attn_out, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K));
         }
         P("mvmB", mvm(y.B, K));
-        P("addres", addres(y.B, K));
-        P("sumsq", sumsq(K));
-        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.post_norm, 0, nullptr, K));
+        P("addres", addres(y.B, K, sP));
+        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.post_norm, 0, nullptr, K, sP));
         P("mvmC", mvm(y.C, K));
         P("prep_swiglu", prep(1, nullptr, D_FF, D_FF, y.C.parts, y.C.yrows, signs[2], nullptr, D_FF, ybuf, K));
         P("mvmD", mvm(y.D, K));
-        P("addres", addres(y.D, K));
+        P("addres", addres(y.D, K, sN));
     }
 
     // embeds: [K][5120] host floats.  logits_out: [K][n_vocab] host floats (may be null for a pure prompt step)
     void eval(const float* embeds, int K, int pos, float* logits_out) {
         memcpy(emb_host, embeds, (size_t) K * D_MODEL * 4);
         CK(cudaMemcpyAsync(rx, emb_host, (size_t) K * D_MODEL * 4, cudaMemcpyHostToDevice, st));
+        CK(cudaMemsetAsync(ssq, 0, (size_t) (2 * 64 + 2) * KMAX * 4, st));
+        sumsq_kernel<<<dim3(K), 256, 0, st>>>(rx, D_MODEL, slot(0));
         for (int il = 0; il < 64; ++il) layer(il, K, pos);
-        sumsq(K);
-        prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], out_norm, 0, nullptr, K);
+        prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], out_norm, 0, nullptr, K, slot(128));
         if (logits_out) {
             const int G = 40;
-            if (K == 1) mvm_kernel<1><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
-            else if (K == 2) mvm_kernel<2><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
-            else mvm_kernel<4><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
+            if (K == 1) mvm_kernel<1><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, A, d8, sa, y_logits, G, D_MODEL, 1, out.yrows);
+            else if (K == 2) mvm_kernel<2><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, A, d8, sa, y_logits, G, D_MODEL, 1, out.yrows);
+            else mvm_kernel<4><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, A, d8, sa, y_logits, G, D_MODEL, 1, out.yrows);
             for (int k = 0; k < K; ++k) CK(cudaMemcpyAsync(logits_out + (size_t) k * n_vocab, y_logits + (size_t) k * out.yrows, (size_t) n_vocab * 4, cudaMemcpyDeviceToHost, st));
         }
         CK(cudaStreamSynchronize(st));
