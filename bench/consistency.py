@@ -19,7 +19,7 @@ def run():
     lib.tr_test_tile.restype = ctypes.c_double; lib.tr_test_tile.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     lib.tr_test_attn.restype = ctypes.c_double; lib.tr_test_attn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     for il in (0, 3):
-        print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 32, 37, 64)] for w in range(4)}, flush=True)
+        print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 32, 37, 64, 65, 128)] for w in range(4)}, flush=True)
     print("wide attention vs per-token attention:", {L: f"{lib.tr_test_attn(e, 3, L, 37):.2e}" for L in (0, 5, 300, 511, 512, 1500, 3000)}, flush=True)
     toks = [1024 + (i * 37) % 4000 for i in range(200)]
     lib.tr_reset.argtypes = [ctypes.c_void_p]
@@ -37,7 +37,7 @@ def run():
     ref = run_chunks([1] * 140)
     ref2 = run_chunks([1] * 140)
     print("K=1 run-to-run max diff", max(float(np.abs(ref[i] - ref2[i]).max()) for i in ref), flush=True)
-    for name, sizes in {"K=2": [2] * 70, "K=4": [4] * 35, "K=8": [8] * 17, "K=9": [9] * 15, "K=33": [33] * 4, "K=64": [64, 64],
+    for name, sizes in {"K=2": [2] * 70, "K=4": [4] * 35, "K=8": [8] * 17, "K=9": [9] * 15, "K=33": [33] * 4, "K=64": [64, 64], "K=128": [128],
                         "64+36+then 1s": [64, 36] + [1] * 40, "17+then 4s": [17] + [4] * 30}.items():
         g = run_chunks(sizes)
         d = {i: float(np.abs(g[i] - ref[i]).max()) for i in g}

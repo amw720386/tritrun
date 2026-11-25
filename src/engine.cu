@@ -26,7 +26,7 @@ typedef uint32_t u32;
 
 static const int CH = 1024;            // rows per chunk
 static const int KREC = 4;             // tokens per step that can be rolled back
-static const int KMAX = 64;          // tokens per step (prefill width)
+static const int KMAX = 128;         // tokens per step (prefill width)
 static const int KLOG = 4;           // tokens per step that can return logits (wider steps return the last token only)
 static const int D_MODEL = 5120, D_INNER = 6144, D_FF = 17408;
 static const int QKV = 10240, GATE96 = 96;
@@ -1145,7 +1145,8 @@ struct Engine {
         else if (K <= 4) mvm_kernel<4, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
         else if (K <= 8) mvm_kernel<8, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
         else if (K <= 32) mvm_tile_kernel<32><<<dim3(yrows / TILE_R, 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
-        else mvm_tile_kernel<64><<<dim3(yrows / TILE_R, (K + 63) / 64), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
+        else if (K <= 64) mvm_tile_kernel<64><<<dim3(yrows / TILE_R, 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
+        else mvm_tile_kernel<128><<<dim3(yrows / TILE_R, 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
     }
     void mvm(Mvm& m, int K) {
         const int G = m.cols / 128;
