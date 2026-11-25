@@ -440,7 +440,7 @@ __device__ __forceinline__ void tile_decode_w(const TileW& r, u32* sW, float* sh
 
 template <int TC>
 __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
-                                                              const int G, const int yrows, const int K, const ssq_t* ss) {
+                                                              const int G, const int yrows, const int K, const ssq_t* ss, const int parts) {
     constexpr int RW = TILE_RWT(TC), R = tile_rows(TC), NF = RW / 16;         // rows per block, row fragments per warp
     constexpr int NW = (2 * R + TILE_NT - 1) / TILE_NT;         // half-rows decoded per thread and group
     constexpr int NI = (TC * 8 + TILE_NT - 1) / TILE_NT;        // 16-byte activation items per thread and group (8 per token)
@@ -451,7 +451,8 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
     __shared__ float sh[R];                                     // group scale [row]
     const int tid = threadIdx.x, lane = tid & 31, wi = tid >> 5;
     const int tgw = wi & (TC / 32 - 1), rgw = wi / (TC / 32);
-    const int row0 = blockIdx.x * R, tok0 = blockIdx.y * TC;
+    const int row0 = blockIdx.x * R, tok0 = 0, part = blockIdx.y;              // all tokens in one block; blockIdx.y = column partition
+    const int gper = (G + parts - 1) / parts, g0 = part * gper, g1 = min(G, g0 + gper);
     const u32* Wc = W + (size_t) (row0 / CH) * G * 7 * CH + (row0 % CH);
     const uint4* A0 = (const uint4*) A;
     const bool ls = tid < TC && tok0 + tid < K;
@@ -468,9 +469,9 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
         for (int j = 0; j < NW; ++j) { const int hr = tid + TILE_NT * j; if (hr < 2 * R) tile_decode_w<R>(nw[j], sW, sh, hr / R, hr % R); } \
         for (int j = 0; j < NI; ++j) { const int it = tid + TILE_NT * j, tk = it >> 3, v_ = it & 7; if (tk < TC && tok0 + tk < K) ((uint4*) sA)[((v_ >> 1) * TC + tk) * 2 + (v_ & 1)] = na[j]; } \
         if (ls) { sd[0][tid] = nd.x; sd[1][tid] = nd.y; sd[2][tid] = nd.z; sd[3][tid] = nd.w; sc[tid] = nc; } }
-    TILE_FETCH(0)
+    TILE_FETCH(g0)
     TILE_STORE
-    if (G > 1) TILE_FETCH(1)
+    if (g0 + 1 < g1) TILE_FETCH(g0 + 1)
     __syncthreads();
 
     float acc[NF][TILE_TT][4];                                  // [row fragment][token fragment][row half * 2 + column]
@@ -479,7 +480,7 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
 #pragma unroll
         for (int t = 0; t < TILE_TT; ++t) acc[f][t][0] = acc[f][t][1] = acc[f][t][2] = acc[f][t][3] = 0.0f;
     const int kA = lane & 3, r0 = rgw * RW + (lane >> 2), tb0 = tgw * 32;
-    for (int g = 0; g < G; ++g) {
+    for (int g = g0; g < g1; ++g) {
         float dA[NF][2], nA[NF][2];
 #pragma unroll
         for (int f = 0; f < NF; ++f)
@@ -519,9 +520,9 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
                 for (int u = 0; u < 2; ++u) { acc[f][t][u * 2] = __fmaf_rn(-dA[f][u], c.x, acc[f][t][u * 2]); acc[f][t][u * 2 + 1] = __fmaf_rn(-dA[f][u], c.y, acc[f][t][u * 2 + 1]); }
         }
         __syncthreads();
-        if (g + 1 < G) {
+        if (g + 1 < g1) {
             TILE_STORE
-            if (g + 2 < G) TILE_FETCH(g + 2)
+            if (g + 2 < g1) TILE_FETCH(g + 2)
         }
         __syncthreads();
     }
@@ -535,7 +536,7 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
 #pragma unroll
                 for (int f = 0; f < NF; ++f)
 #pragma unroll
-                    for (int u = 0; u < 2; ++u) Y[(size_t) tok * yrows + row0 + r0 + 16 * f + 8 * u] = acc[f][t][u * 2 + v] * ir;
+                    for (int u = 0; u < 2; ++u) Y[((size_t) tok * parts + part) * yrows + row0 + r0 + 16 * f + 8 * u] = acc[f][t][u * 2 + v] * ir;
             }
         }
 #undef TILE_FETCH
@@ -662,6 +663,116 @@ __global__ void gdn_kernel(const float* qkv, const float* g_raw, const float* dt
         if (lane == 0 && out) out[(size_t) k * D_INNER + h * 128 + col] = acc;
     }
     for (int r = 0; r < 4; ++r) Sw[r * 32 + lane] = s_[r];
+}
+
+// ---------------------------------------------------------------------------------------------
+// wide steps (prefill) of the recurrent layers.  The 1..8-token kernels above are kept as they are, so narrow steps stay bit-identical.
+// ---------------------------------------------------------------------------------------------
+// beta / alpha projections: a block evaluates 8 rows for 8 tokens, so each activation it reads serves 8 rows
+__global__ __launch_bounds__(256) void gate_wide_kernel(const float* x, const ssq_t* ssq, const float* nw, const half* wb, const half* wa, float* out, int K) {
+    __shared__ float part[8][64];
+    const int r0 = blockIdx.x * 8, k0 = blockIdx.y * 8, tid = threadIdx.x;
+    const int nk = min(8, K - k0);
+    float acc[8][8], ir[8];
+#pragma unroll
+    for (int t = 0; t < 8; ++t) { ir[t] = t < nk ? ssq_rms_inv(ssq[k0 + t], D_MODEL) : 0.0f; for (int r = 0; r < 8; ++r) acc[r][t] = 0; }
+    for (int e = tid; e < D_MODEL; e += 256) {
+        float xn[8];
+        const float nwe = nw[e];
+#pragma unroll
+        for (int t = 0; t < 8; ++t) xn[t] = t < nk ? x[(size_t) (k0 + t) * D_MODEL + e] * ir[t] * nwe : 0.0f;
+#pragma unroll
+        for (int r = 0; r < 8; ++r) {
+            const int row = r0 + r;
+            const float w = __half2float(row < 48 ? wb[(size_t) row * D_MODEL + e] : wa[(size_t) (row - 48) * D_MODEL + e]);
+#pragma unroll
+            for (int t = 0; t < 8; ++t) acc[r][t] += w * xn[t];
+        }
+    }
+#pragma unroll
+    for (int r = 0; r < 8; ++r)
+#pragma unroll
+        for (int t = 0; t < 8; ++t) { const float v = warp_sum(acc[r][t]); if ((tid & 31) == 0) part[tid >> 5][r * 8 + t] = v; }
+    __syncthreads();
+    if (tid < 64 && (tid & 7) < nk) { float v = 0; for (int w = 0; w < 8; ++w) v += part[w][tid]; out[(k0 + (tid & 7)) * GATE96 + r0 + (tid >> 3)] = v; }
+}
+
+// depthwise conv: no recurrence, so every (channel, token) is independent; the inputs before the step come from the state
+__global__ __launch_bounds__(128) void convqk_wide_kernel(const float* yA, int parts, int yrows, const float* ck, const float* st_in, float* st_out, float* qkv, int K) {
+    __shared__ float ps[4];
+    const int b = blockIdx.x, k = blockIdx.y, tid = threadIdx.x, ch = b * 128 + tid;
+    float x[4];
+#pragma unroll
+    for (int j = 0; j < 4; ++j) { const int kk = k - 3 + j; x[j] = kk >= 0 ? part_sum(yA + (size_t) kk * parts * yrows + ch, parts, yrows) : st_in[3 * ch + 3 + kk]; }
+    float o = silu_f(x[0] * ck[4 * ch] + x[1] * ck[4 * ch + 1] + x[2] * ck[4 * ch + 2] + x[3] * ck[4 * ch + 3]);
+    if (b < 32) {
+        const float ss = warp_sum(o * o);
+        if ((tid & 31) == 0) ps[tid >> 5] = ss;
+        __syncthreads();
+        o *= 1.0f / fmaxf(sqrtf(ps[0] + ps[1] + ps[2] + ps[3]), 1e-6f);
+    }
+    qkv[(size_t) k * QKV + ch] = o;
+    if (k >= K - 3) st_out[3 * ch + k - (K - 3)] = x[3];
+}
+
+// gated delta net over many tokens: the keys, queries, values and gates of TT tokens are staged in shared memory once per block
+// (they are the same for all 128 columns of a head), and the two reductions of a token are done together:
+// with S the state before the token, out = g (S q) + delta (k q), delta = (v - g (S k)) beta
+template <int TT>
+__global__ __launch_bounds__(256) void gdn_wide_kernel(const float* qkv, const float* g_raw, const float* dt_bias, const float* ssm_a,
+                                                       const float* S_in, float* S_out, float* out, int K) {
+    __shared__ __align__(16) float sk[TT][128];
+    __shared__ __align__(16) float sq[TT][128];
+    __shared__ float sv[TT][32], sg[TT], sbt[TT], skq[TT];
+    // block: 32 columns of one head; 8 lanes per column, lane j of a column holds rows 4 j + 32 i + (0..3), i = 0..3
+    const int h = blockIdx.x, cgrp = blockIdx.y, tid = threadIdx.x, sub = tid & 7, cl = tid >> 3;
+    const int col = cgrp * 32 + cl, nk = h % 16;
+    const float* Sr = S_in + ((size_t) h * 128 + col) * 128;
+    float s_[16];
+#pragma unroll
+    for (int i = 0; i < 4; ++i) { const float4 v = *(const float4*) (Sr + 32 * i + 4 * sub); s_[4 * i] = v.x; s_[4 * i + 1] = v.y; s_[4 * i + 2] = v.z; s_[4 * i + 3] = v.w; }
+    for (int k0 = 0; k0 < K; k0 += TT) {
+        const int nt = min(TT, K - k0);
+        for (int i = tid; i < TT * 128; i += 256) {
+            const int t = i >> 7, e = i & 127;
+            if (t < nt) { const float* qk = qkv + (size_t) (k0 + t) * QKV; sk[t][e] = qk[2048 + nk * 128 + e]; sq[t][e] = qk[nk * 128 + e]; }
+        }
+        for (int i = tid; i < TT * 32; i += 256) if ((i >> 5) < nt) sv[i >> 5][i & 31] = qkv[(size_t) (k0 + (i >> 5)) * QKV + 4096 + h * 128 + cgrp * 32 + (i & 31)];
+        if (tid < nt) {
+            const int k = k0 + tid;
+            sbt[tid] = 1.0f / (1.0f + expf(-g_raw[k * GATE96 + h]));
+            sg[tid] = expf(ssm_a[h] * softplus_f(g_raw[k * GATE96 + 48 + h] + dt_bias[h]));
+        }
+        __syncthreads();
+        for (int t = tid >> 5; t < nt; t += 8) {
+            float p = 0;
+#pragma unroll
+            for (int r = 0; r < 4; ++r) p += sk[t][r * 32 + (tid & 31)] * sq[t][r * 32 + (tid & 31)];
+            p = warp_sum(p);
+            if ((tid & 31) == 0) skq[t] = p;
+        }
+        __syncthreads();
+        for (int t = 0; t < nt; ++t) {
+            float kr[16], a = 0, c = 0;
+#pragma unroll
+            for (int i = 0; i < 4; ++i) {
+                const float4 kv = *(const float4*) &sk[t][32 * i + 4 * sub], qv = *(const float4*) &sq[t][32 * i + 4 * sub];
+                kr[4 * i] = kv.x; kr[4 * i + 1] = kv.y; kr[4 * i + 2] = kv.z; kr[4 * i + 3] = kv.w;
+                a += s_[4 * i] * kv.x + s_[4 * i + 1] * kv.y + s_[4 * i + 2] * kv.z + s_[4 * i + 3] * kv.w;
+                c += s_[4 * i] * qv.x + s_[4 * i + 1] * qv.y + s_[4 * i + 2] * qv.z + s_[4 * i + 3] * qv.w;
+            }
+#pragma unroll
+            for (int o = 4; o > 0; o >>= 1) { a += __shfl_xor_sync(0xFFFFFFFFu, a, o); c += __shfl_xor_sync(0xFFFFFFFFu, c, o); }
+            const float gv = sg[t], delta = (sv[t][cl] - gv * a) * sbt[t];
+#pragma unroll
+            for (int r = 0; r < 16; ++r) s_[r] = gv * s_[r] + kr[r] * delta;
+            if (sub == 0 && out) out[(size_t) (k0 + t) * D_INNER + h * 128 + col] = (gv * c + delta * skq[t]) * 0.088388347648318447f;
+        }
+        __syncthreads();
+    }
+    float* Sw = S_out + ((size_t) h * 128 + col) * 128;
+#pragma unroll
+    for (int i = 0; i < 4; ++i) *(float4*) (Sw + 32 * i + 4 * sub) = make_float4(s_[4 * i], s_[4 * i + 1], s_[4 * i + 2], s_[4 * i + 3]);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -987,7 +1098,7 @@ static std::vector<float> to_f32(const gguf::Tensor& t) {
 
 struct Engine {
     gguf::File f;
-    int ctx = 4096, n_vocab = 248320, n_sm = 40;
+    int ctx = 4096, n_vocab = 248320, n_sm = 40, wide_cap = 1 << 30;
     std::vector<Layer> L;
     Mvm out;                                         // lm head
     Mtp mtp;
@@ -1130,6 +1241,7 @@ struct Engine {
         n_vocab = out.rows;
         rx = dalloc((size_t) KMAX * D_MODEL); irms = dalloc(KMAX); CK(cudaMalloc(&ssq, (size_t) (2 * 64 + 2) * KMAX * sizeof(ssq_t)));
         CK(cudaMalloc(&A, (size_t) KMAX * (D_FF / 128) * 128)); CK(cudaMalloc(&d8, (size_t) KMAX * (D_FF / 128) * 16)); CK(cudaMalloc(&sa, (size_t) KMAX * (D_FF / 128) * 16));
+        wide_cap = 0; for (auto& y : L) for (Mvm* m : { &y.A, &y.B, &y.C, &y.D }) wide_cap = std::max(wide_cap, m->yrows);
         { size_t mx = 0; for (auto& y : L) for (Mvm* m : { &y.A, &y.B, &y.C, &y.D }) for (int k : { 4, 8, KMAX }) mx = std::max(mx, (size_t) eff_parts(*m, k) * m->yrows * k); ybuf = dalloc(mx); }
         y_logits = dalloc((size_t) KLOG * out.yrows);
         qkv = dalloc((size_t) KMAX * QKV); gout = dalloc((size_t) KMAX * D_INNER); gated = dalloc((size_t) KMAX * D_INNER);
@@ -1201,7 +1313,17 @@ struct Engine {
     // residual update + RMS-norm input of the next block: adds the partial results of matrix m (null = nothing pending)
     void prep_norm(const Mvm* m, const float* w, int K, ssq_t* ss) { prep(0, rx, D_MODEL, D_MODEL, m ? eff_parts(*m, K) : 0, m ? m->yrows : 0, signs[0], w, 0, ybuf, K, ss); }
     // column partitions used for K tokens (wider steps allow fewer groups per block because shared memory holds K activation records)
-    int eff_parts(const Mvm& m, int K) const { if (K > 8) return 1; const int G = m.cols / 128; const int lim = K > 4 ? 20 : 40; return std::min(G, std::max(m.parts, (G + lim - 1) / lim)); }
+    // wide steps: column partitions that fill the SMs best (a block per SM at a time), without more partial rows than the largest matrix has
+    int wide_parts(const Mvm& m, int K) const {
+        const int R = K <= 32 ? tile_rows(32) : (K <= 64 ? tile_rows(64) : tile_rows(128)), nb = m.yrows / R, G = m.cols / 128;
+        int best = 1; double be = 0;
+        for (int p = 1; p * m.yrows <= wide_cap && G / p >= 8; ++p) {
+            const double e = (double) nb * p / ((double) n_sm * ((nb * p + n_sm - 1) / n_sm));
+            if (e > be + 0.01) { be = e; best = p; }
+        }
+        return best;
+    }
+    int eff_parts(const Mvm& m, int K) const { if (K > 8) return wide_parts(m, K); const int G = m.cols / 128; const int lim = K > 4 ? 20 : 40; return std::min(G, std::max(m.parts, (G + lim - 1) / lim)); }
     void launch_mvm(const u32* w, float* y, int K, int G, int parts, int yrows, const ssq_t* ss, GateArgs ga = GateArgs{}) {
 #define MVM_GO(KK, NT, RPT, PF) { const int nb = yrows / ((NT) * (RPT)); ga.gy = ga.out ? (GATE96 + nb - 1) / nb : 0; \
         if (ga.gy) mvm_kernel<KK, NT, RPT, PF, true><<<dim3(nb, parts + ga.gy), NT, MVM_SMEM(KK, G, parts), st>>>(w, A, d8, sa, y, G, parts, yrows, ss, ga); \
@@ -1210,9 +1332,9 @@ struct Engine {
         else if (K == 2) MVM_GO(2, 256, 1, true)
         else if (K <= 4) MVM_GO(4, 128, 4, false)     // small blocks: many fit on an SM
         else if (K <= 8) MVM_GO(8, 256, 4, false)
-        else if (K <= 32) mvm_tile_kernel<32><<<dim3(yrows / tile_rows(32), 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss);
-        else if (K <= 64) mvm_tile_kernel<64><<<dim3(yrows / tile_rows(64), 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss);
-        else mvm_tile_kernel<128><<<dim3(yrows / tile_rows(128), 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss);
+        else if (K <= 32) mvm_tile_kernel<32><<<dim3(yrows / tile_rows(32), parts), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss, parts);
+        else if (K <= 64) mvm_tile_kernel<64><<<dim3(yrows / tile_rows(64), parts), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss, parts);
+        else mvm_tile_kernel<128><<<dim3(yrows / tile_rows(128), parts), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K, ss, parts);
     }
     void mvm(Mvm& m, int K, const ssq_t* ss = nullptr, GateArgs ga = GateArgs{}) { launch_mvm(m.w, ybuf, K, m.cols / 128, eff_parts(m, K), m.yrows, ss, ga); }
     void lm_head(int K, const ssq_t* ss, float* y) { launch_mvm(out.w, y, K, 40, eff_parts(out, K), out.yrows, ss); }
@@ -1239,8 +1361,15 @@ struct Engine {
         if (gfuse) { ga.x = rx; ga.nw = y.attn_norm; ga.wb = y.wb; ga.wa = y.wa; ga.out = y.g_raw; }
         P("mvmA", mvm(y.A, K, sA, ga));
         if (y.recr) {
-            if (!gfuse) P("gate", (gate_kernel<<<dim3(96, (K + 7) / 8), 256, 0, st>>>(rx, sA, y.attn_norm, y.wb, y.wa, y.g_raw, K)));
-            P("convgdn", gdn_part(il, K, nullptr));
+            if (K > 8) {                                        // wide steps: kernels that work across tokens (never rolled back)
+                P("gate", (gate_wide_kernel<<<dim3(12, (K + 7) / 8), 256, 0, st>>>(rx, sA, y.attn_norm, y.wb, y.wa, y.g_raw, K)));
+                P("conv", (convqk_wide_kernel<<<dim3(80, K), 128, 0, st>>>(ybuf, eff_parts(y.A, K), y.A.yrows, y.conv_k, y.conv[cur], y.conv[cur ^ 1], qkv, K)));
+                P("gdn", (gdn_wide_kernel<16><<<dim3(48, 4), 256, 0, st>>>(qkv, y.g_raw, y.dt_bias, y.ssm_a, y.gdn[cur], y.gdn[cur ^ 1], gout, K)));
+            } else {
+                if (!gfuse) P("gate", (gate_kernel<<<dim3(96, (K + 7) / 8), 256, 0, st>>>(rx, sA, y.attn_norm, y.wb, y.wa, y.g_raw, K)));
+                P("conv", (convqk_kernel<<<80, 128, 0, st>>>(ybuf, eff_parts(y.A, K), y.A.yrows, y.conv_k, y.conv[cur], y.conv[cur ^ 1], qkv, nullptr, K > KREC ? nullptr : y.rec_conv, K)));
+                P("gdn", (gdn_kernel<<<dim3(48, 16), 256, 0, st>>>(qkv, y.g_raw, y.dt_bias, y.ssm_a, y.gdn[cur], y.gdn[cur ^ 1], gout, K)));
+            }
             P("prep_ssm", prep(2, gout, D_INNER, D_INNER, eff_parts(y.A, K), y.A.yrows, signs[1], y.ssm_norm, 0, ybuf, K));
         } else {
             P("attn_prep", (attn_prep_kernel<<<dim3(32, K), 256, 0, st>>>(ybuf, eff_parts(y.A, K), y.A.yrows, y.qnorm, y.knorm, Q, gate, y.kc, y.vc, ctx, pos, rope_base, 0)));
@@ -1420,7 +1549,9 @@ double tr_test_tile(void* p, int il, int K, int which) {
     const int sg = n == 5120 ? 0 : (n == 6144 ? 1 : 2);
     e->prep(3, d, n, n, 0, 0, e->signs[sg], nullptr, 0, nullptr, K);
     e->mvm(m, K); e->sync();
-    std::vector<float> wide((size_t) K * m.yrows); CK(cudaMemcpy(wide.data(), e->ybuf, wide.size() * 4, cudaMemcpyDeviceToHost));
+    const int wp = e->eff_parts(m, K);
+    std::vector<float> wpart((size_t) K * wp * m.yrows), wide((size_t) K * m.yrows, 0.0f); CK(cudaMemcpy(wpart.data(), e->ybuf, wpart.size() * 4, cudaMemcpyDeviceToHost));
+    for (int k = 0; k < K; ++k) for (int q = 0; q < wp; ++q) for (int r = 0; r < m.yrows; ++r) wide[(size_t) k * m.yrows + r] += wpart[((size_t) k * wp + q) * m.yrows + r];
     double worst = 0, scale = 0; for (float v : wide) scale = std::max(scale, (double) fabsf(v));
     for (int k = 0; k < K; ++k) {
         e->prep(3, d + (size_t) k * n, n, n, 0, 0, e->signs[sg], nullptr, 0, nullptr, 1);       // narrow records of token k (the wide step used another format)
