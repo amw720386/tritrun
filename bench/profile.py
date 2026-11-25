@@ -9,7 +9,7 @@ ARCH = {"T4": "sm_75", "A10G": "sm_86", "L4": "sm_89"}
 
 def body(gpu, prof, flags=""):
     import numpy as np
-    arch = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA L4": "sm_89"}.get(subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip(), "sm_75")
+    arch = {"Tesla T4": "sm_75", "NVIDIA A10": "sm_86", "NVIDIA A10G": "sm_86", "NVIDIA L4": "sm_89"}.get(subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip(), "sm_75")
     r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={arch} {flags} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); return
     if prof: os.environ["TR_PROF"] = "1"
@@ -29,7 +29,7 @@ def body(gpu, prof, flags=""):
     print(f"{gpu} prof={prof} K=1: {dt/n*1e3:.2f} ms/token = {n/dt:.2f} tok/s", flush=True)
     if prof: lib.tr_prof_dump(n)
     # K-token steps (verification width): time per step, not per token
-    for K in (2, 4, 8):
+    for K in (4,):
         bufk = (ctypes.c_float * (248320 * K))()
         pos = 200
         def step(p, want):
@@ -51,5 +51,12 @@ def t4(prof=True, variants=""):
         import multiprocessing as mp
         p = mp.get_context("spawn").Process(target=body, args=("T4", prof, v)); p.start(); p.join()
 
+@app.function(gpu="A10", volumes={"/w": VOL}, timeout=1200, cpu=8, memory=24576)
+def a10(prof=True, variants=""):
+    for v in (variants.split(";") if variants else [""]):
+        print("=== variant", v, flush=True)
+        import multiprocessing as mp
+        p = mp.get_context("spawn").Process(target=body, args=("A10", prof, v)); p.start(); p.join()
+
 @app.local_entrypoint()
-def main(prof: bool = True, variants: str = ""): t4.remote(prof, variants)
+def main(prof: bool = True, variants: str = "", gpu: str = "t4"): {"t4": t4, "a10": a10}[gpu].remote(prof, variants)

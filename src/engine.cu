@@ -701,11 +701,14 @@ struct Engine {
                 y.ssm_norm = up(T("ssm_norm.weight")); y.dt_bias = up(T("ssm_dt.bias")); y.ssm_a = up(T("ssm_a")); y.conv_k = up(T("ssm_conv1d.weight"));
                 y.wb = upload_half(to_f32(*T("ssm_beta.weight"))); y.wa = upload_half(to_f32(*T("ssm_alpha.weight"))); dev_bytes += 2 * (size_t) 48 * D_MODEL * 2;
                 const size_t cb = (size_t) 3 * QKV * 4, sbytes = (size_t) 48 * 128 * 128 * 4;
+                // plain decode updates the state in place; speculation keeps a checkpoint, so it needs a second copy
                 for (int c = 0; c < 2; ++c) {
+                    if (c == 1 && !with_mtp) { y.conv[1] = y.conv[0]; y.gdn[1] = y.gdn[0]; break; }
                     CK(cudaMalloc(&y.conv[c], cb)); CK(cudaMemset(y.conv[c], 0, cb)); dev_bytes += cb;
                     CK(cudaMalloc(&y.gdn[c], sbytes)); CK(cudaMemset(y.gdn[c], 0, sbytes)); dev_bytes += sbytes;
                 }
-                CK(cudaMalloc(&y.rec_conv, (size_t) KREC * QKV * 4)); CK(cudaMalloc(&y.g_raw, (size_t) KMAX * GATE96 * 4)); dev_bytes += ((size_t) KREC * QKV + (size_t) KMAX * GATE96) * 4;
+                if (with_mtp) { CK(cudaMalloc(&y.rec_conv, (size_t) KREC * QKV * 4)); dev_bytes += (size_t) KREC * QKV * 4; }
+                CK(cudaMalloc(&y.g_raw, (size_t) KMAX * GATE96 * 4)); dev_bytes += (size_t) KMAX * GATE96 * 4;
             } else {
                 load_mvm(y.A, { T("attn_q.weight"), T("attn_k.weight"), T("attn_v.weight") }, 1);
                 load_mvm(y.B, { T("attn_output.weight") }, 1);
