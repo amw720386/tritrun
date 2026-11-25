@@ -26,7 +26,7 @@ typedef uint32_t u32;
 
 static const int CH = 1024;            // rows per chunk
 static const int KREC = 4;             // tokens per step that can be rolled back
-static const int KMAX = 64;          // tokens per step (prefill width)
+static const int KMAX = 128;         // tokens per step (prefill width)
 static const int KLOG = 4;           // tokens per step that can return logits (wider steps return the last token only)
 static const int D_MODEL = 5120, D_INNER = 6144, D_FF = 17408;
 static const int QKV = 10240, GATE96 = 96;
@@ -302,7 +302,7 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
 // The integer sums are the decode kernel's; int->float uses the 1.5 * 2^23 trick so it costs one add.
 // ---------------------------------------------------------------------------------------------
 #ifndef TILE_CC
-#define TILE_CC 64
+#define TILE_CC 128
 #endif
 static const int TILE_R = 64, TILE_C = TILE_CC;                                   // rows x tokens per block
 static const int TILE_NT = 512;                                              // 16 warps: 4 row groups of 16 x 4 token groups of 8
@@ -330,42 +330,25 @@ static const int TPAD = 4;
 #define TWI(sub, kp, row) (((sub) * 4 + (kp)) * (TILE_R + TPAD) + (row))
 #define TAI(sub, kp, tok) (((sub) * 4 + (kp)) * (TILE_C + TPAD) + (tok))
 
-struct TileRegs { u32 w0, w1, w2, w6; uint4 a0, a1; float dv; int bv; };
-
+struct TileW { u32 w0, w1, w2, w6; };
+struct TileA { uint4 a[4]; float dv[2]; int bv[2]; };                        // two sub-blocks of one token
 static const int TPASS = TILE_C / 32;                                        // 32-token passes evaluated per decoded group
-// loader roles: weights of row (tid & 63), half (tid >> 6) for tid < 128; activations of sub-block (tid & 3) of token (tid >> 2) for tid < 4 TILE_C
-__device__ __forceinline__ void tile_fetch(TileRegs& r, const bool lw, const bool la, const u32* Wq, const uint4* A0, const float* d8, const int* sa,
-                                           int half_, int row, int G, int g, int tok, int qu) {
-#ifndef TILE_NOW
-    if (lw) {
-        r.w0 = Wq[(half_ ? 3 : 0) * CH + row]; r.w1 = Wq[(half_ ? 4 : 1) * CH + row]; r.w2 = Wq[(half_ ? 5 : 2) * CH + row];
-        if (!half_) r.w6 = Wq[6 * CH + row];
-    }
-#endif
-#ifndef TILE_NOA
-    if (la) {
-        r.a0 = A0[(size_t) g * 8]; r.a1 = A0[(size_t) g * 8 + 1];
-        r.dv = d8[((size_t) tok * G + g) * 4 + qu]; r.bv = F_MAGIC_I - sa[((size_t) tok * G + g) * 4 + qu];
-    }
-#endif
-}
 
-__device__ __forceinline__ void tile_decode(const TileRegs& r, const bool lw, const bool la0, u32* sW, u32* sA, float* sd, int* sb, float* sh,
-                                            int half_, int row, int tk, int qu) {
-#ifdef TILE_NOA
-    if (false) {
-#else
-    if (la0) {                                                  // also for tokens beyond K: zero activations, so every buffer entry is defined
-#endif
-        const u32 aw[8] = { r.a0.x, r.a0.y, r.a0.z, r.a0.w, r.a1.x, r.a1.y, r.a1.z, r.a1.w };
+__device__ __forceinline__ void tile_fetch_w(TileW& r, const u32* Wq, int half_, int row) {
+    r.w0 = Wq[(half_ ? 3 : 0) * CH + row]; r.w1 = Wq[(half_ ? 4 : 1) * CH + row]; r.w2 = Wq[(half_ ? 5 : 2) * CH + row];
+    if (!half_) r.w6 = Wq[6 * CH + row];
+}
+// sub-blocks 2 qp and 2 qp + 1 of one token
+__device__ __forceinline__ void tile_fetch_a(TileA& r, const uint4* A0, const float* d8, const int* sa, int G, int g, int tok, int qp) {
 #pragma unroll
-        for (int i = 0; i < 8; ++i) sA[TAI(qu, i & 3, tk) * 2 + (i >> 2)] = aw[i];
-        sd[qu * TILE_C + tk] = r.dv; sb[qu * TILE_C + tk] = r.bv;
+    for (int s_ = 0; s_ < 2; ++s_) {
+        const int q = 2 * qp + s_;
+        r.a[2 * s_] = A0[(size_t) g * 8 + q * 2]; r.a[2 * s_ + 1] = A0[(size_t) g * 8 + q * 2 + 1];
+        r.dv[s_] = d8[((size_t) tok * G + g) * 4 + q]; r.bv[s_] = F_MAGIC_I - sa[((size_t) tok * G + g) * 4 + q];
     }
-#ifdef TILE_NOW
-    return;
-#endif
-    if (!lw) return;
+}
+// weights of row (tid & 63), half (tid >> 6): words 0,1,2,6 or 3,4,5 -> digit words
+__device__ __forceinline__ void tile_decode_w(const TileW& r, u32* sW, float* sh, int half_, int row) {
     u32 l0 = r.w0 & 0x00FF00FFu, h0 = (r.w0 >> 8) & 0x00FF00FFu, l1 = r.w1 & 0x00FF00FFu, h1 = (r.w1 >> 8) & 0x00FF00FFu, l2 = r.w2 & 0x00FF00FFu, h2 = (r.w2 >> 8) & 0x00FF00FFu;
 #define TSW(w) sW[TWI((w) >> 3, (w) & 3, row) * 2 + (((w) & 7) >> 2)]
 #pragma unroll
@@ -383,30 +366,50 @@ __device__ __forceinline__ void tile_decode(const TileRegs& r, const bool lw, co
     }
 #undef TSW
 }
+// activations of sub-blocks 2 qp, 2 qp + 1 of token tk
+__device__ __forceinline__ void tile_decode_a(const TileA& r, u32* sA, float* sd, int* sb, int tk, int qp) {
+#pragma unroll
+    for (int s_ = 0; s_ < 2; ++s_) {
+        const int q = 2 * qp + s_;
+        const u32 aw[8] = { r.a[2 * s_].x, r.a[2 * s_].y, r.a[2 * s_].z, r.a[2 * s_].w, r.a[2 * s_ + 1].x, r.a[2 * s_ + 1].y, r.a[2 * s_ + 1].z, r.a[2 * s_ + 1].w };
+#pragma unroll
+        for (int i = 0; i < 8; ++i) sA[TAI(q, i & 3, tk) * 2 + (i >> 2)] = aw[i];
+        sd[q * TILE_C + tk] = r.dv[s_]; sb[q * TILE_C + tk] = r.bv[s_];
+    }
+}
+__device__ __forceinline__ void tile_zero_a(TileA& r) {
+#pragma unroll
+    for (int k = 0; k < 4; ++k) r.a[k] = make_uint4(0, 0, 0, 0);
+    r.dv[0] = r.dv[1] = 0; r.bv[0] = r.bv[1] = F_MAGIC_I;
+}
 
 __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
                                                               const int G, const int yrows, const int K) {
-    // double buffered: while the block evaluates group g the loader threads decode group g + 1 into the other half
+    // weights are double buffered (group g + 1 is decoded while group g is evaluated); activations are single buffered and
+    // refreshed between the two barriers of a group, which keeps two blocks resident per SM
     __shared__ __align__(16) u32 sW[2][16 * (TILE_R + TPAD) * 2];   // [sub-block][k & 3][row][pair]
-    __shared__ __align__(16) u32 sA[2][16 * (TILE_C + TPAD) * 2];   // [sub-block][k & 3][token][pair]
-    __shared__ __align__(16) float sd[2][4 * TILE_C];               // [sub-block][token]
-    __shared__ __align__(16) int sb[2][4 * TILE_C];
+    __shared__ __align__(16) u32 sA[16 * (TILE_C + TPAD) * 2];      // [sub-block][k & 3][token][pair]
+    __shared__ __align__(16) float sd[4 * TILE_C];                  // [sub-block][token]
+    __shared__ __align__(16) int sb[4 * TILE_C];
     __shared__ float sh[2][TILE_R];
     const int tid = threadIdx.x, lane = tid & 31, wi = tid >> 5;
     const int rg = wi & 3;                                      // this warp's row group (16 rows); its token group is (wi >> 2) + 4 * pass
     const int row0 = blockIdx.x * TILE_R, tok0 = blockIdx.y * TILE_C;
     const u32* Wc = W + (size_t) (row0 / CH) * G * 7 * CH + (row0 % CH);
-    // weight loaders: warps 0-3; activation loaders: warps 4-11 (4 TILE_C threads), so no warp carries both roles
-    const bool lw = tid < 128, la0 = tid >= 128 && tid < 128 + 4 * TILE_C;
+    // weight loaders: warps 0-3; activation loaders: the 2 TILE_C threads after them (two sub-blocks of one token each)
+    static_assert(128 + 2 * TILE_C <= TILE_NT, "not enough threads for the activation loaders");
+    const bool lw = tid < 128, la0 = tid >= 128 && tid < 128 + 2 * TILE_C;
     const int ra = tid - 128;
-    const int row = tid & 63, half_ = (tid >> 6) & 1, tk = la0 ? ra >> 2 : 0, qu = la0 ? ra & 3 : 0;
+    const int row = tid & 63, half_ = (tid >> 6) & 1, tk = la0 ? ra >> 1 : 0, qp = la0 ? ra & 1 : 0;
     const bool la = la0 && tok0 + tk < K;
-    const uint4* A0 = (const uint4*) A + ((size_t) (tok0 + tk) * G) * 8 + qu * 2;
-    TileRegs nxt;
-    nxt.w0 = nxt.w1 = nxt.w2 = nxt.w6 = 0; nxt.a0 = nxt.a1 = make_uint4(0, 0, 0, 0); nxt.dv = 0; nxt.bv = F_MAGIC_I;
-    tile_fetch(nxt, lw, la, Wc, A0, d8, sa, half_, row, G, 0, tok0 + tk, qu);
-    tile_decode(nxt, lw, la0, sW[0], sA[0], sd[0], sb[0], sh[0], half_, row, tk, qu);
-    if (G > 1) tile_fetch(nxt, lw, la, Wc + (size_t) 7 * CH, A0, d8, sa, half_, row, G, 1, tok0 + tk, qu);
+    const uint4* A0 = (const uint4*) A + ((size_t) (tok0 + tk) * G) * 8;
+    TileW nw; nw.w0 = nw.w1 = nw.w2 = nw.w6 = 0;
+    TileA na; tile_zero_a(na);
+    if (lw) { TileW w0r; tile_fetch_w(w0r, Wc, half_, row); tile_decode_w(w0r, sW[0], sh[0], half_, row); if (G > 1) tile_fetch_w(nw, Wc + (size_t) 7 * CH, half_, row); }
+    if (la) { tile_fetch_a(na, A0, d8, sa, G, 0, tok0 + tk, qp); }
+    if (la0) { tile_decode_a(na, sA, sd, sb, tk, qp); }          // zero record when the token is absent
+    if (la && G > 1) tile_fetch_a(na, A0, d8, sa, G, 1, tok0 + tk, qp);
+    else if (la0) tile_zero_a(na);
     __syncthreads();
 
     float acc[TPASS][4];                                        // [pass][row half * 2 + column]: rows 8u + lane/4, tokens 2(lane%4) + v
@@ -415,12 +418,10 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
     const int rA = rg * 16 + (lane >> 2), kA = lane & 3;
     for (int g = 0; g < G; ++g) {
         const int b = g & 1;
-#ifndef TILE_NODEC
-        if (g + 1 < G && (lw || la0)) {                         // decode group g + 1 into the idle half, then request group g + 2
-            tile_decode(nxt, lw, la0, sW[b ^ 1], sA[b ^ 1], sd[b ^ 1], sb[b ^ 1], sh[b ^ 1], half_, row, tk, qu);
-            if (g + 2 < G) tile_fetch(nxt, lw, la, Wc + (size_t) (g + 2) * 7 * CH, A0, d8, sa, half_, row, G, g + 2, tok0 + tk, qu);
+        if (lw && g + 1 < G) {                                  // decode group g + 1 into the idle half, then request group g + 2
+            tile_decode_w(nw, sW[b ^ 1], sh[b ^ 1], half_, row);
+            if (g + 2 < G) tile_fetch_w(nw, Wc + (size_t) (g + 2) * 7 * CH, half_, row);
         }
-#endif
         float f[TPASS][4];
 #pragma unroll
         for (int p = 0; p < TPASS; ++p) f[p][0] = f[p][1] = f[p][2] = f[p][3] = 0.0f;
@@ -431,12 +432,12 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
 #pragma unroll
             for (int p = 0; p < TPASS; ++p) {
                 const int tg = (wi >> 2) + 4 * p, tB = tg * 8 + (lane >> 2), tC = tg * 8 + 2 * (lane & 3);
-                const uint2 b01 = ((const uint2*) sA[b])[TAI(q, kA, tB)];
+                const uint2 b01 = ((const uint2*) sA)[TAI(q, kA, tB)];
                 const u32 Bf[2] = { b01.x, b01.y };
-                const int2 bb = ((const int2*) sb[b])[(q * TILE_C + tC) >> 1];
+                const int2 bb = ((const int2*) sb)[(q * TILE_C + tC) >> 1];
                 int D[4] = { bb.x, bb.y, bb.x, bb.y };
                 mma_16x8x32(D, Af, Bf);
-                const float2 ds = ((const float2*) sd[b])[(q * TILE_C + tC) >> 1];
+                const float2 ds = ((const float2*) sd)[(q * TILE_C + tC) >> 1];
                 f[p][0] += ds.x * (__int_as_float(D[0]) - F_MAGIC_F); f[p][1] += ds.y * (__int_as_float(D[1]) - F_MAGIC_F);
                 f[p][2] += ds.x * (__int_as_float(D[2]) - F_MAGIC_F); f[p][3] += ds.y * (__int_as_float(D[3]) - F_MAGIC_F);
             }
@@ -444,6 +445,11 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
         const float dh0 = sh[b][rA], dh1 = sh[b][rA + 8];
 #pragma unroll
         for (int p = 0; p < TPASS; ++p) { acc[p][0] += dh0 * f[p][0]; acc[p][1] += dh0 * f[p][1]; acc[p][2] += dh1 * f[p][2]; acc[p][3] += dh1 * f[p][3]; }
+        __syncthreads();
+        if (g + 1 < G) {
+            if (la0) tile_decode_a(na, sA, sd, sb, tk, qp);     // group g + 1 (zeros for absent tokens)
+            if (la && g + 2 < G) tile_fetch_a(na, A0, d8, sa, G, g + 2, tok0 + tk, qp);
+        }
         __syncthreads();
     }
 #pragma unroll
