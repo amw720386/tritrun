@@ -1,0 +1,13 @@
+D=0: 600 tokens in 19.42s (incl. prefill) = 30.89 tok/s; decode-only 31.88 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 13.51s (incl. prefill) = 44.43 tok/s; decode-only 46.47 tok/s; rounds 327 accepted 272 drafted 327; accept rate 0.83, tokens/round 1.83
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 12.94s (incl. prefill) = 46.37 tok/s; decode-only 48.63 tok/s; rounds 245 accepted 355 drafted 490; accept rate 0.72, tokens/round 2.45
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 12.10s (incl. prefill) = 49.57 tok/s; decode-only 52.19 tok/s; rounds 206 accepted 395 drafted 618; accept rate 0.64, tokens/round 2.92

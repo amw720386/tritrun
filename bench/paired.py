@@ -5,7 +5,8 @@ import modal
 from modal_common import VOL, GGUF, image
 app = modal.App("bonsai25-engine-paired", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"), "/src"))
-W = f"/w/{GGUF}"
+W = f"/w/{GGUF}"                                   # -mtp file
+WP = "/w/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf"        # plain file: the right one for fork plain mode (no draft head in VRAM)
 ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA L4": "sm_89"}
 PROMPTS = ["Implement quicksort in Python and explain its complexity.",
            "Write a short story about a lighthouse keeper who finds a message in a bottle.",
@@ -26,12 +27,12 @@ class Vram(threading.Thread):
             except Exception: pass
             time.sleep(0.3)
 
-def fork_run(toks, spec):
+def fork_run(toks, spec, pmin=0.1, ub=512):
     import requests
     ls = find("llama-server"); os.environ["LD_LIBRARY_PATH"] = os.path.dirname(ls) + ":" + os.environ.get("LD_LIBRARY_PATH", "")
-    extra = "--spec-type draft-mtp --spec-draft-n-min 0 --spec-draft-n-max 3 --spec-draft-p-min 0.1" if spec else ""
+    extra = f"--spec-type draft-mtp --spec-draft-n-min 0 --spec-draft-n-max 3 --spec-draft-p-min {pmin}" if spec else ""
     v = Vram(); v.start()
-    p = subprocess.Popen(f"{ls} -m {W} -ngl 99 -fa on -c {CTX} -np 1 --port 8099 --cache-ram 0 {extra} > /tmp/s.log 2>&1", shell=True)
+    p = subprocess.Popen(f"{ls} -m {W if spec else WP} -ngl 99 -fa on -c {CTX} -ub {ub} -np 1 --port 8099 --cache-ram 0 {extra} > /tmp/s.log 2>&1", shell=True)
     for _ in range(600):
         try:
             if requests.get("http://127.0.0.1:8099/health", timeout=2).status_code == 200: break
@@ -77,6 +78,14 @@ def ours_run(D):
     r = json.loads(line[0][4:]); r["vram_mib"] = v.peak
     return r
 
+@app.function(volumes={"/w": VOL}, timeout=3600, cpu=4)
+def fetch_plain():
+    from huggingface_hub import hf_hub_download
+    from modal_common import REPO, REV
+    if not os.path.exists(WP):
+        hf_hub_download(REPO, os.path.basename(WP), revision=REV, local_dir="/w"); VOL.commit()
+    print("plain file", os.path.getsize(WP))
+
 def run_all(reps=2):
     ls = subprocess.check_output("find /opt/prism -name llama-tokenize -type f | head -1", shell=True, text=True).strip()
     os.environ["LD_LIBRARY_PATH"] = os.path.dirname(ls)
@@ -90,8 +99,11 @@ def run_all(reps=2):
     print("GPU", gname, flush=True)
     res = {}
     for rep in range(reps):
-        for key, fn in [("fork_plain", lambda: fork_run(toks, False)), ("ours_plain", lambda: ours_run(0)),
-                        ("fork_mtp", lambda: fork_run(toks, True)), ("ours_mtp3", lambda: ours_run(3))]:
+        for key, fn in [("fork_plain", lambda: fork_run(toks, False)), ("fork_plain_ub64", lambda: fork_run(toks, False, ub=64)),
+                        ("ours_plain", lambda: ours_run(0)),
+                        ("fork_mtp_p0.1", lambda: fork_run(toks, True)), ("fork_mtp_p0", lambda: fork_run(toks, True, pmin=0)),
+                        ("fork_mtp_p0_ub64", lambda: fork_run(toks, True, pmin=0, ub=64)),
+                        ("ours_mtp3", lambda: ours_run(3))]:
             r = fn(); res.setdefault(key, []).append(r); print(f"[{gname}] rep{rep} {key}: {json.dumps(r)}", flush=True)
     print("SUMMARY", json.dumps({k: {m: sorted(x[m] for x in v)[len(v) // 2] for m in ("decode_tps", "prefill_tps", "vram_mib")} for k, v in res.items()}, indent=None), flush=True)
     return res
@@ -105,6 +117,7 @@ def a10(): run_all()
 
 @app.local_entrypoint()
 def main(which: str = "t4,l4,a10"):
+    fetch_plain.remote()
     hs = {n: {"t4": t4, "l4": l4, "a10": a10}[n].spawn() for n in which.split(",")}
     for n, h in hs.items():
         try: h.get()

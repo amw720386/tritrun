@@ -1,0 +1,27 @@
+build ok /src/engine.cu(978): warning #177-D: variable "NV" was declared but never referenced
+greedy agreement 24 / 24
+pos 0: max|dlogprob| 0.0820 mean 0.0364
+pos 1: max|dlogprob| 0.0401 mean 0.0177
+pos 2: max|dlogprob| 0.0748 mean 0.0213
+pos 3: max|dlogprob| 0.0750 mean 0.0367
+pos 4: max|dlogprob| 0.0461 mean 0.0126
+pos 5: max|dlogprob| 0.0752 mean 0.0212
+pos 6: max|dlogprob| 0.0496 mean 0.0121
+pos 7: max|dlogprob| 0.0767 mean 0.0221
+pos 8: max|dlogprob| 0.0859 mean 0.0320
+pos 9: max|dlogprob| 0.0845 mean 0.0532
+pos 10: max|dlogprob| 0.0540 mean 0.0319
+pos 11: max|dlogprob| 0.0626 mean 0.0275
+pos 12: max|dlogprob| 0.0708 mean 0.0373
+pos 13: max|dlogprob| 0.0565 mean 0.0233
+pos 14: max|dlogprob| 0.0740 mean 0.0217
+pos 15: max|dlogprob| 0.0358 mean 0.0158
+pos 16: max|dlogprob| 0.0260 mean 0.0101
+pos 17: max|dlogprob| 0.1021 mean 0.0409
+pos 18: max|dlogprob| 0.0412 mean 0.0239
+pos 19: max|dlogprob| 0.0749 mean 0.0302
+pos 20: max|dlogprob| 0.0694 mean 0.0272
+pos 21: max|dlogprob| 0.0915 mean 0.0404
+pos 22: max|dlogprob| 0.4343 mean 0.1165
+pos 23: max|dlogprob| 0.0815 mean 0.0442
+decode s/token 0.031027403744784268 -> 32.2295738381946 tok/s
