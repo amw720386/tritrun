@@ -3,16 +3,16 @@ the fork's greedy continuation and compare top-10 log-probabilities and argmax. 
 the fork than the one-token path (and than the fork is from itself at a different batch size)."""
 import ctypes, json, os, subprocess, sys, time
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, GPU, gpu_arch
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 app = modal.App("bonsai25-engine-validate-long", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(ROOT, "src"), "/src"))
 W = f"/w/{GGUF}"
 
-@app.function(gpu="T4", volumes={"/w": VOL}, timeout=3000, cpu=8, memory=24576)
+@app.function(gpu=GPU, volumes={"/w": VOL}, timeout=3000, cpu=8, memory=24576)
 def run(n_gen=32):
     import numpy as np, requests, glob
-    r = subprocess.run("nvcc -O3 -std=c++17 -arch=sm_75 --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
+    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={gpu_arch()} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-2000:]); raise SystemExit("build")
     ls = subprocess.check_output("find /opt/prism -name llama-server -type f | head -1", shell=True, text=True).strip()
     env = {**os.environ, "LD_LIBRARY_PATH": os.path.dirname(ls)}

@@ -1,4 +1,5 @@
 """Shared Modal pieces: the weights volume and the CUDA build/run image."""
+import os, subprocess
 import modal
 
 VOL = modal.Volume.from_name("bonsai25-engine", create_if_missing=True)
@@ -17,3 +18,9 @@ image = (
     .pip_install("huggingface_hub[hf_transfer]", "numpy", "requests")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
+
+ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89"}
+GPU = os.environ.get("GPU", "T4")                  # card for the single-card checks: GPU=L4 modal run ...
+
+def gpu_arch():
+    return ARCHS[subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip()]

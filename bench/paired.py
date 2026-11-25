@@ -2,13 +2,12 @@
 Reports decode-only tok/s and peak VRAM per configuration (nvidia-smi polled)."""
 import ctypes, json, os, subprocess, sys, time, threading
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, ARCHS
 _img = image.add_local_python_source("modal_common").add_local_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"), "/src")
 if os.environ.get("BASE_SRC"): _img = _img.add_local_dir(os.environ["BASE_SRC"], "/src_base")   # optional: an older src/, measured next to the current one
 app = modal.App("bonsai25-engine-paired", image=_img)
 W = f"/w/{GGUF}"                                   # -mtp file
 WP = "/w/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf"        # plain file: the right one for fork plain mode (no draft head in VRAM)
-ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89"}
 PROMPTS = ["Implement quicksort in Python and explain its complexity.",
            "Write a short story about a lighthouse keeper who finds a message in a bottle.",
            "A train leaves at 3pm travelling 60 mph; another leaves at 4pm at 80 mph on the same track. When does the second catch the first? Show your work.",
@@ -49,10 +48,10 @@ def fork_run(toks, spec, pmin=0.1, ub=512):
 
 def ours_setup():
     gname = subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip()
-    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS.get(gname, 'sm_75')} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
+    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build")
     if os.path.exists("/src_base/engine.cu"):
-        r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS.get(gname, 'sm_75')} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l_base.so /src_base/engine.cu", shell=True, capture_output=True, text=True)
+        r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l_base.so /src_base/engine.cu", shell=True, capture_output=True, text=True)
         if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build base")
 
 # the engine is run in a child process so its VRAM is measured in isolation

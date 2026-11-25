@@ -1,15 +1,15 @@
 """K=4 batched steps vs K=1 steps on the same tokens (logit agreement), and rollback replay correctness."""
 import ctypes, json, os, subprocess, sys, time
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, GPU, gpu_arch
 app = modal.App("bonsai25-engine-consistency", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"), "/src"))
 W = f"/w/{GGUF}"
 
-@app.function(gpu="T4", volumes={"/w": VOL}, timeout=1800, cpu=8, memory=24576)
+@app.function(gpu=GPU, volumes={"/w": VOL}, timeout=1800, cpu=8, memory=24576)
 def run():
     import numpy as np
-    r = subprocess.run("nvcc -O3 -std=c++17 -arch=sm_75 --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
+    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={gpu_arch()} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build")
     lib = ctypes.CDLL("/tmp/l.so")
     lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
@@ -20,7 +20,8 @@ def run():
     lib.tr_test_attn.restype = ctypes.c_double; lib.tr_test_attn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     for il in (0, 3):
         print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 32, 37, 64, 65, 128)] for w in range(4)}, flush=True)
-    print("wide attention vs per-token attention:", {L: f"{lib.tr_test_attn(e, 3, L, 37):.2e}" for L in (0, 5, 300, 511, 512, 1500, 3000)}, flush=True)
+    for k in (1, 4, 9):
+        print(f"attention (K={k}) vs CPU reference, max error / max|out|:", {L: f"{lib.tr_test_attn(e, 3, L, k):.1e}" for L in (0, 5, 300, 511, 512, 513, 1500, 3000)}, flush=True)
     toks = [1024 + (i * 37) % 4000 for i in range(200)]
     lib.tr_reset.argtypes = [ctypes.c_void_p]
     def run_chunks(sizes):

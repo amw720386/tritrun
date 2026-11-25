@@ -1,7 +1,7 @@
 """Build the engine on a Modal T4, compare against the PrismML fork on identical tokens (greedy tokens + top-10 logprobs)."""
 import ctypes, json, os, subprocess, sys, time
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, GPU, gpu_arch
 
 app = modal.App("bonsai25-engine-validate", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"), "/src"))
@@ -39,10 +39,10 @@ def ref_run(n_gen):
         probs.append([(t["id"], t["logprob"] if "logprob" in t else t.get("prob")) for t in top])
     return toks, gen, probs
 
-@app.function(gpu="T4", volumes={"/w": VOL}, timeout=3000, cpu=8, memory=24576)
+@app.function(gpu=GPU, volumes={"/w": VOL}, timeout=3000, cpu=8, memory=24576)
 def validate(n_gen=24):
     import numpy as np
-    build("sm_75")
+    build(gpu_arch())
     toks, gen, probs = ref_run(n_gen)
     print("prompt toks", len(toks), "ref gen", gen[:10], flush=True)
     lib = ctypes.CDLL("/tmp/libtritrun.so")

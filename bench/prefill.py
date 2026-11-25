@@ -5,13 +5,12 @@ whole prefill plus the first token.  Also checks that the first token agrees.
 """
 import ctypes, json, os, subprocess, sys, time
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, ARCHS
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 app = modal.App("bonsai25-engine-prefill", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(ROOT, "src"), "/src"))
 W = f"/w/{GGUF}"
 WP = "/w/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf"
-ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89"}
 
 CHILD = r'''
 import ctypes, json, sys, time
@@ -36,7 +35,7 @@ print("RES", json.dumps(res), flush=True)
 def run(prof=False, fork=True):
     import requests
     gname = subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip()
-    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS.get(gname, 'sm_75')} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
+    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build")
     ls = subprocess.check_output("find /opt/prism -name llama-server -type f | head -1", shell=True, text=True).strip()
     env = {**os.environ, "LD_LIBRARY_PATH": os.path.dirname(ls)}

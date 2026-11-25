@@ -2,11 +2,10 @@
 (TR_REP launches per sample, so synchronisation latency averages out)."""
 import ctypes, os, subprocess, sys
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, ARCHS
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 app = modal.App("bonsai25-engine-launch", image=image.add_local_python_source("modal_common").add_local_dir(os.path.join(ROOT, "src"), "/src"))
 W = f"/w/{GGUF}"
-ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89"}
 CHILD = r'''
 import ctypes, os, sys, time
 prof = os.environ.get("TR_PROF")

@@ -1,11 +1,10 @@
 """Speculative (MTP) vs plain greedy decode on a Modal GPU: same outputs, acceptance, tok/s."""
 import ctypes, json, os, subprocess, sys, time
 import modal
-from modal_common import VOL, GGUF, image
+from modal_common import VOL, GGUF, image, ARCHS
 app = modal.App("bonsai25-engine-spec", image=image.add_local_python_source("modal_common")
                 .add_local_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"), "/src"))
 W = f"/w/{GGUF}"
-ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA L4": "sm_89"}
 PROMPTS = ["Implement quicksort in Python and explain its complexity.",
            "Write a short story about a lighthouse keeper who finds a message in a bottle.",
            "A train leaves at 3pm travelling 60 mph; another leaves at 4pm at 80 mph on the same track. When does the second catch the first? Show your work."]
@@ -13,7 +12,7 @@ PROMPTS = ["Implement quicksort in Python and explain its complexity.",
 def body(max_new=200, ctx=4096, drafts=(0, 1, 2, 3)):
     import numpy as np
     gname = subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip()
-    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS.get(gname, 'sm_75')} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
+    r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build")
     # tokenize with the fork (no server compute: tokenize endpoint needs the model; do it once)
     ls = subprocess.check_output("find /opt/prism -name llama-tokenize -type f | head -1", shell=True, text=True).strip()

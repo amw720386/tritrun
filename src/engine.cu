@@ -1421,21 +1421,31 @@ double tr_test_tile(void* p, int il, int K, int which) {
     CK(cudaFree(d));
     return worst;
 }
-double tr_test_attn(void* p, int il, int L, int K) {          // wide attention against the per-token kernel on random queries, gates and KV
+// attention on random queries, gates and KV against a double-precision CPU reference; returns the largest relative error
+double tr_test_attn(void* p, int il, int L, int K) {
     Engine* e = (Engine*) p; Layer& y = e->L[il]; if (y.recr) return -1;
-    const size_t nq = (size_t) K * 24 * 256, ng = (size_t) K * D_INNER, nk = (size_t) 4 * e->ctx * 256;
-    std::vector<float> q(nq), g(ng); std::vector<half> kv(nk); srand(77);
+    const size_t nq = (size_t) K * 24 * 256, nk = (size_t) 4 * e->ctx * 256;
+    std::vector<float> q(nq), g(nq), a(nq); std::vector<float> kf(nk), vf(nk); std::vector<half> kh(nk), vh(nk); srand(77);
     for (auto& v : q) v = (rand() % 2000 - 1000) / 1000.0f; for (auto& v : g) v = (rand() % 1000) / 1000.0f;
-    for (auto& v : kv) v = __float2half((rand() % 2000 - 1000) / 1000.0f * 1.5f);
-    CK(cudaMemcpy(e->Q, q.data(), nq * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(e->gate, g.data(), ng * 4, cudaMemcpyHostToDevice));
-    CK(cudaMemcpy(y.kc, kv.data(), nk * 2, cudaMemcpyHostToDevice));
-    for (auto& v : kv) v = __float2half((rand() % 2000 - 1000) / 1000.0f); CK(cudaMemcpy(y.vc, kv.data(), nk * 2, cudaMemcpyHostToDevice));
-    std::vector<float> a(ng), b(ng);
-    const int pos = L;
-    e->attn(e->Q, e->gate, y.kc, y.vc, pos, e->attn_out, K, 0); e->sync(); CK(cudaMemcpy(a.data(), e->attn_out, ng * 4, cudaMemcpyDeviceToHost));
-    for (int k = 0; k < K; ++k) attn_kernel<1><<<dim3(24, 1), 256, 0, e->st>>>(e->Q + (size_t) k * D_INNER, e->gate + (size_t) k * D_INNER, y.kc, y.vc, e->ctx, pos + k, e->attn_out + (size_t) k * D_INNER, 1, 0); e->sync(); CK(cudaMemcpy(b.data(), e->attn_out, ng * 4, cudaMemcpyDeviceToHost));
-    double worst = 0, scale = 0; for (float v : b) scale = std::max(scale, (double) fabsf(v));
-    for (size_t i = 0; i < ng; ++i) worst = std::max(worst, (double) fabsf(a[i] - b[i]) / scale);
+    for (size_t i = 0; i < nk; ++i) { kh[i] = __float2half((rand() % 2000 - 1000) / 1000.0f * 1.5f); vh[i] = __float2half((rand() % 2000 - 1000) / 1000.0f); kf[i] = __half2float(kh[i]); vf[i] = __half2float(vh[i]); }
+    CK(cudaMemcpy(e->Q, q.data(), nq * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(e->gate, g.data(), nq * 4, cudaMemcpyHostToDevice));
+    CK(cudaMemcpy(y.kc, kh.data(), nk * 2, cudaMemcpyHostToDevice)); CK(cudaMemcpy(y.vc, vh.data(), nk * 2, cudaMemcpyHostToDevice));
+    const int ps = L > 0 ? 1 : 0;                         // also exercises the first-visible-position argument
+    e->attn(e->Q, e->gate, y.kc, y.vc, L, e->attn_out, K, ps); e->sync(); CK(cudaMemcpy(a.data(), e->attn_out, nq * 4, cudaMemcpyDeviceToHost));
+    double worst = 0, scale = 0;
+    std::vector<double> ref(nq, 0.0);
+    for (int h = 0; h < 24; ++h) for (int k = 0; k < K; ++k) {
+        const float* qv = &q[((size_t) k * 24 + h) * 256];
+        const float *kb = &kf[(size_t) (h / 6) * e->ctx * 256], *vb = &vf[(size_t) (h / 6) * e->ctx * 256];
+        const int n = L + k + 1; std::vector<double> sc(n); double m = -1e300, su = 0;
+        for (int t = ps; t < n; ++t) { double d = 0; for (int i = 0; i < 256; ++i) d += (double) qv[i] * kb[(size_t) t * 256 + i]; sc[t] = d / 16.0; m = std::max(m, sc[t]); }
+        for (int t = ps; t < n; ++t) { sc[t] = std::exp(sc[t] - m); su += sc[t]; }
+        double* r = &ref[(size_t) k * D_INNER + h * 256];
+        for (int t = ps; t < n; ++t) for (int i = 0; i < 256; ++i) r[i] += sc[t] / su * vb[(size_t) t * 256 + i];
+        for (int i = 0; i < 256; ++i) r[i] *= g[(size_t) k * D_INNER + h * 256 + i];
+    }
+    for (double v : ref) scale = std::max(scale, std::fabs(v));
+    for (size_t i = 0; i < nq; ++i) worst = std::max(worst, std::fabs(a[i] - ref[i]) / scale);
     return worst;
 }
 void tr_reset(void* p) { ((Engine*) p)->reset_state(); }
