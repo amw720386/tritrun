@@ -48,7 +48,7 @@ at 512 tokens and 109 at 2048.
   128-token and one-token prefill: T4 95 / 95, L4 95 / 94, A10 96 / 95. The fork does not always agree with
   itself either: changing its batch size changed its free-running output on one of the three prompts on T4 and
   on one on L4. The mean top-10 log-probability difference per prompt is 0.022 to 0.048; for the fork against
-  itself it is 0.026 to 0.049. This is a small sample, and no quality benchmark has been run.
+  itself it is 0.026 to 0.049. The quality section below uses larger samples.
 * On a short prompt, 24 of 24 greedy tokens agree with the fork on each of the three cards.
 * Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical, on all three
   cards. Wider steps add the group sums in a different order, so int8 activations can round differently: single
@@ -57,6 +57,48 @@ at 512 tokens and 109 at 2048.
 * Speculative output equals plain greedy output for 1, 2 and 3 drafts on 3 prompts of 200 tokens, on all three
   cards.
 * The tokenizer built from the GGUF agrees with the fork's on 7 test strings.
+
+## Quality
+
+Same model file, compared with the fork and with a control: the fork against itself at another physical batch
+size, which shows how far its own rounding moves the results. Prompts use the fork's chat template with thinking
+disabled and the fork's tokenizer, so both engines get identical ids.
+
+| Test | Fork | Fork, `-ub 64` | Ours | Hardware |
+|---|---|---|---|---|
+| WikiText-2 perplexity, 10,200 scored tokens | 9.7154 | 9.7145 | 9.7131 | T4 |
+| | 9.7147 | 9.7167 | 9.7175 | L4 |
+| | 9.7160 | 9.7156 | 9.7169 | A10G |
+| MMLU, 1,000 random test questions, correct | 778 | 775 | 778 | A10G |
+| (second run) | 777 | 778 | 778 | A10 |
+| GSM8K, 300 random test questions, 2,048-token limit, correct | 282 | 283 | 281 | A10 |
+| GSM8K, same questions, 768-token limit, correct | 269 | 272 | 269 | A10G |
+
+* **MMLU choices.** Ours picks the fork's answer on 1000 and 998 of 1000 questions; the control on 997 and 999.
+* **GSM8K answers.** With the 2,048-token limit, ours gives the fork's final number on 291 of 300 (control 292) and
+  a byte-identical answer on 212 (control 214). Greedy text diverges after one near-tie, so the rest differ in
+  wording. All three of the questions that only the fork got right are ones where the answer tail shows ours
+  still re-checking its working, not stating a final answer. Runs hit the limit 7 (fork), 7 (control) and 8
+  (ours) times. MTP with 3 drafts was used.
+* **Perplexity.** Mean negative log-likelihood, ours minus the fork: -0.00023 to +0.00029, each within about one
+  standard error (0.0003 to 0.00045) of zero. Top-1 agreement is 99.3 to 99.4% (control 99.4 to 99.5%).
+* **KL divergence from the fork.** Median 9e-5 in both ours and the control, 99th percentile 0.0018 (control
+  0.0016 to 0.0021). The mean is 0.00032 to 0.00043 (control 0.00021 to 0.00031); without each run's single worst
+  token it is 0.00022 to 0.00024 (control 0.00020 to 0.00023). That worst token is the same one in ours on all three cards (KL 1.0 to 2.0) and is numerically
+  unstable: the fork's log-probability for it ranges from -1.24 to -0.05 (T4) and -1.18 to -0.07 (L4) across
+  eleven batch sizes. The neighbouring tokens are normal.
+* **No systematic offset found** (T4, L4; all 10,200 tokens; 8 fork batch sizes against 5 of our step splits).
+  Mean absolute difference in the true token's log-probability: fork to fork 0.0134 (L4) and 0.0124 (T4), fork
+  to ours 0.0135 and 0.0134; on T4 several fork batch sizes give identical results, which lowers its own
+  figure. The squared gap left after removing each engine's own variation is inside the range obtained by
+  splitting the fork's own arms in two, on both cards. On T4 and L4, 400 randomly placed tokens scored from a
+  wide step differ from the fork by about as much as it differs from itself. Of four tokens picked because they
+  looked bad, one stayed outside the fork's range on T4 for every step split: log-probability -0.26 to -0.34
+  against -0.03 to -0.24.
+
+What this does not show: accuracy differences of about a point or less on these samples; results with thinking
+enabled, with long contexts, or with other samplers; MMLU and GSM8K on T4 and L4. `bench/quality.py`,
+`bench/offset.py` and `bench/outlier.py` reproduce the numbers, and `results/quality_*.log` holds the output.
 
 ## How it works
 
@@ -92,6 +134,6 @@ GGUF (no tools, no reasoning controls).
 Greedy only, one sequence, text only, context up to 8192, no KV quantization, no server. `build.sh` (the
 multi-architecture build) has not been run; the benchmarks compile one architecture at a time with the same
 flags. Correctness
-was checked on T4, L4 and A10 with the small tests above.
+was checked on T4, L4 and A10 with the tests above.
 
 `bench/` holds the Modal harnesses and `results/` the raw logs behind the numbers above.
