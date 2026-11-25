@@ -549,6 +549,26 @@ __global__ void q4mv_kernel(const u32* nib, const half* sc, const float* x, floa
 // ---------------------------------------------------------------------------------------------
 struct Mvm { u32* w = nullptr; int rows = 0, cols = 0, chunks = 0, parts = 1, yrows = 0; size_t bytes = 0; };
 
+// device allocator: one exactly-sized arena for the weights and 64 MB slabs for the rest, because many separate
+// cudaMalloc calls waste up to 2 MB each
+struct Pool {
+    char* base = nullptr; size_t cap = 0, used = 0, total = 0;
+    static cudaError_t raw(void** p, size_t n) { return (cudaMalloc)(p, n); }
+    void arena(size_t n) { CK(raw((void**) &base, n)); cap = n; used = 0; total = n; }
+    void* take(size_t n) {
+        n = (n + 255) & ~(size_t) 255;
+        if (used + n > cap) {
+            if (n > (size_t) (48u << 20)) { char* q; CK(raw((void**) &q, n)); total += n; return q; }
+            const size_t c = (size_t) 64 << 20; CK(raw((void**) &base, c)); cap = c; used = 0; total += c;
+        }
+        char* q = base + used; used += n; return q;
+    }
+};
+static Pool g_pool;                                      // misc arrays
+static Pool g_wpool;                                     // weights
+static cudaError_t pool_malloc(void** p, size_t n) { *p = g_pool.take(n); return cudaSuccess; }
+#define cudaMalloc(p, n) pool_malloc((void**) (p), (n))
+
 struct Layer {
     Mvm A, B, C, D;
     float* attn_norm = nullptr; float* post_norm = nullptr;
@@ -649,7 +669,7 @@ struct Engine {
             }
         });
         for (auto& t : th) t.join();
-        CK(cudaMalloc(&m.w, words * 4)); m.bytes = words * 4; dev_bytes += words * 4;
+        m.w = (u32*) g_wpool.take(words * 4); m.bytes = words * 4; dev_bytes += words * 4;
         CK(cudaMemcpy(m.w, host.data(), words * 4, cudaMemcpyHostToDevice));
     }
     Q4 load_q4(const gguf::Tensor& t) {
@@ -667,8 +687,8 @@ struct Engine {
             }
         });
         for (auto& x : th) x.join();
-        CK(cudaMalloc(&q.nib, nib.size() * 4)); CK(cudaMemcpy(q.nib, nib.data(), nib.size() * 4, cudaMemcpyHostToDevice));
-        CK(cudaMalloc(&q.sc, sc.size() * 2)); CK(cudaMemcpy(q.sc, sc.data(), sc.size() * 2, cudaMemcpyHostToDevice));
+        q.nib = (u32*) g_wpool.take(nib.size() * 4); CK(cudaMemcpy(q.nib, nib.data(), nib.size() * 4, cudaMemcpyHostToDevice));
+        q.sc = (half*) g_wpool.take(sc.size() * 2); CK(cudaMemcpy(q.sc, sc.data(), sc.size() * 2, cudaMemcpyHostToDevice));
         dev_bytes += nib.size() * 4 + sc.size() * 2;
         return q;
     }
@@ -689,6 +709,23 @@ struct Engine {
         CK(cudaStreamCreate(&st));
         const int NL = 64;
         L.resize(NL);
+        {
+            size_t need = 0;
+            auto mvm_b = [&](std::initializer_list<const gguf::Tensor*> ts) { int rows = 0; for (auto* t : ts) rows += (int) t->ne[1]; const size_t G = (*ts.begin())->ne[0] / 128; const size_t b = (size_t) ((rows + CH - 1) / CH) * G * 7 * CH * 4; need += (b + 255) & ~(size_t) 255; };
+            auto q4_b = [&](const gguf::Tensor& t) { const size_t R = t.ne[1], N = t.ne[0] / 32; need += ((N * 4 * R * 4) + 255) & ~(size_t) 255; need += ((N * R * 2) + 255) & ~(size_t) 255; };
+            for (int il = 0; il < NL; ++il) {
+                const std::string p = "blk." + std::to_string(il) + "."; auto T = [&](const std::string& n) { return &f.get(p + n); };
+                if (((il + 1) % 4) != 0) { mvm_b({ T("attn_qkv.weight"), T("attn_gate.weight") }); mvm_b({ T("ssm_out.weight") }); }
+                else { mvm_b({ T("attn_q.weight"), T("attn_k.weight"), T("attn_v.weight") }); mvm_b({ T("attn_output.weight") }); }
+                mvm_b({ T("ffn_gate.weight"), T("ffn_up.weight") }); mvm_b({ T("ffn_down.weight") });
+            }
+            mvm_b({ &f.get("output.weight") });
+            if (with_mtp && f.find("blk.64.nextn.eh_proj.weight")) {
+                const std::string p = "blk.64.";
+                for (const char* n : { "nextn.eh_proj.weight", "attn_q.weight", "attn_k.weight", "attn_v.weight", "attn_output.weight", "ffn_gate.weight", "ffn_up.weight", "ffn_down.weight" }) q4_b(f.get(p + n));
+            }
+            g_wpool.arena(need);
+        }
         auto up = [&](const gguf::Tensor* t) { auto v = to_f32(*t); dev_bytes += v.size() * 4; return upload_f32(v.data(), v.size()); };
         for (int il = 0; il < NL; ++il) {
             Layer& y = L[il]; const std::string p = "blk." + std::to_string(il) + ".";
@@ -964,7 +1001,7 @@ int tr_generate(void* p, const int* prompt, int n, int max_new, const int* eos, 
     out[out_n++] = cur_tok;
     bool done = is_eos(cur_tok);
     // hidden of the last processed trunk token is hlast[last_logit_k] -- copy to a stable buffer
-    float* h_last; CK(cudaMalloc(&h_last, D_MODEL * 4));
+    float* h_last; CK((cudaMalloc)((void**) &h_last, D_MODEL * 4));
     CK(cudaMemcpyAsync(h_last, e->hlast + (size_t) (last_K - 1) * D_MODEL, D_MODEL * 4, cudaMemcpyDeviceToDevice, e->st));
     while (!done && out_n < max_new) {
         if (D == 0) {
