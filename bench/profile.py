@@ -29,12 +29,12 @@ def body(gpu, prof, flags=""):
     print(f"{gpu} prof={prof} K=1: {dt/n*1e3:.2f} ms/token = {n/dt:.2f} tok/s", flush=True)
     if prof: lib.tr_prof_dump(n)
     # K-token steps (verification width): time per step, not per token
-    for K in (4,):
-        bufk = (ctypes.c_float * (248320 * K))()
-        pos = 200
+    for K in ([int(x) for x in os.environ.get('TR_K', '4').split(',')]):
+        bufk = (ctypes.c_float * (248320 * 4))()
+        pos = 64
         def step(p, want):
             a = (ctypes.c_int * K)(*[3000 + p * 7 + q for q in range(K)])
-            lib.tr_eval(e, a, K, p, bufk if (want and K <= 4) else None)
+            lib.tr_eval(e, a, K, p, bufk if want else None)
         for w in range(3): step(pos + w * K, False)
         if prof: lib.tr_prof_dump(3)
         t0 = time.time(); m = 20
@@ -45,18 +45,20 @@ def body(gpu, prof, flags=""):
     print(subprocess.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader", shell=True, capture_output=True, text=True).stdout)
 
 @app.function(gpu="T4", volumes={"/w": VOL}, timeout=1200, cpu=8, memory=24576)
-def t4(prof=True, variants=""):
+def t4(prof=True, variants="", ks="4"):
+    os.environ["TR_K"] = ks
     for v in (variants.split(";") if variants else [""]):
         print("=== variant", v, flush=True)
         import multiprocessing as mp
         p = mp.get_context("spawn").Process(target=body, args=("T4", prof, v)); p.start(); p.join()
 
 @app.function(gpu="A10", volumes={"/w": VOL}, timeout=1200, cpu=8, memory=24576)
-def a10(prof=True, variants=""):
+def a10(prof=True, variants="", ks="4"):
+    os.environ["TR_K"] = ks
     for v in (variants.split(";") if variants else [""]):
         print("=== variant", v, flush=True)
         import multiprocessing as mp
         p = mp.get_context("spawn").Process(target=body, args=("A10", prof, v)); p.start(); p.join()
 
 @app.local_entrypoint()
-def main(prof: bool = True, variants: str = "", gpu: str = "t4"): {"t4": t4, "a10": a10}[gpu].remote(prof, variants)
+def main(prof: bool = True, variants: str = "", gpu: str = "t4", ks: str = "4"): {"t4": t4, "a10": a10}[gpu].remote(prof, variants, ks)
