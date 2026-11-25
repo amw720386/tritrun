@@ -1,9 +1,8 @@
 # tritrun
 
 A standalone CUDA inference engine for **Ternary-Bonsai-2.5-27B** (PTQ1_0 GGUF), aimed at bandwidth-bound
-cards. It uses less VRAM than the PrismML llama.cpp fork on every card tested, and decodes faster than it on
-the weakest one (T4) when the model's MTP draft head is on. On L4 and A10G the fork decodes faster, and the
-fork is faster at prefilling long prompts everywhere.
+cards. On the cards tested (T4, L4, A10) it decodes faster than the PrismML llama.cpp fork and uses less VRAM.
+The fork is still faster at prefilling long prompts.
 
 ## Results
 
@@ -18,9 +17,12 @@ cut-off 0.1 and 0.
 
 | GPU | Plain tok/s, fork / ours | MTP tok/s, fork / ours | Plain VRAM MiB, fork `-ub 64` / ours | MTP VRAM MiB, fork `-ub 64` / ours |
 |---|---|---|---|---|
-| T4 | 32.8 / 31.6 (-4%) | 46.1 / **51.3 (+11%)** | 6038 / **6012** (-0.4%) | 6738 / **6384** (-5%) |
-| L4 | 36.3 / 34.2 (-6%) | 64.6 / 61.6 (-5%) | 6141 / **6099** (-0.7%) | 6849 / **6471** (-6%) |
-| A10G | 64.7 / 53.5 (-17%) | 109.2 / 84.4 (-23%) | 6219 / **6163** (-0.9%) | 6929 / **6535** (-6%) |
+| T4 | 33.2 / **35.2 (+6%)** | 47.1 / **60.7 (+29%)** | 6038 / **6012** (-0.4%) | 6738 / **6384** (-5%) |
+| L4 | 35.9 / **37.6 (+5%)** | 63.5 / **72.8 (+15%)** | 6140 / **6098** (-0.7%) | 6848 / **6470** (-6%) |
+| A10 | 61.4 / **62.0 (+1%)** | 99.4 / **109.7 (+10%)** | 6191 / **6141** (-0.8%) | 6899 / **6513** (-6%) |
+
+The A10 row is the middle one of three machines; across them the margins were +1 to +2% plain and +10 to +12%
+with MTP. A10G machines, which an earlier revision of this table used, were not measured again.
 
 VRAM is peak `nvidia-smi` memory. At the fork's default `-ub 512` its figures are 136 MiB higher in plain mode
 and 240 MiB higher with MTP.
@@ -33,30 +35,37 @@ case. Wide steps handle up to 128 tokens.
 
 | GPU | 64 tokens, fork / ours | 512 tokens, fork / ours | 2048 tokens, fork / ours |
 |---|---|---|---|
-| T4 | 206 / **226** | 326 / 249 (76%) | 336 / 240 (71%) |
-| L4 | 440 / **473** | 786 / 562 (71%) | 837 / 540 (64%) |
-| A10 | 499 / 496 | 896 / 578 (65%) | 924 / 560 (61%) |
+| T4 | 203 / **224** | 321 / 260 (81%) | 329 / 250 (76%) |
+| L4 | 376 / **498** | 761 / 582 (77%) | 806 / 556 (69%) |
+| A10 | 515 / 526 | 919 / 621 (68%) | 954 / 598 (63%) |
 
-With MTP on, prefill here costs 1 to 4% more. Before the batched path existed, the T4 figures were 125 tok/s
+With MTP on, prefill of 512 or more tokens costs 3 to 4% more. Before the batched path existed, the T4 figures were 125 tok/s
 at 512 tokens and 109 at 2048.
 
 ## Validation
 
-* Against the fork on real 300- and 1000-token prompts (T4): 96 of 96 teacher-forced greedy tokens agree.
-  The mean top-10 log-probability difference is 0.025 to 0.050, whether the prompt is prefilled in 128-token
-  steps or one token at a time. The fork compared with itself at two batch sizes differs by 0.026 to 0.049.
-  This is a small sample, and no quality benchmark has been run.
-* Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical. Wider steps
-  add the group sums in a different order, so int8 activations can round differently: single kernels agree
-  to 1e-6 or better, full logits to about 0.1.
-* Speculative output equals plain greedy output for 1, 2 and 3 drafts on 3 prompts of 200 tokens.
+* Against the fork on real 300- and 1000-token prompts, teacher-forced greedy tokens that agree, out of 96, for
+  128-token and one-token prefill: T4 95 / 95, L4 95 / 94, A10 96 / 95. The fork does not always agree with
+  itself either: changing its batch size changed its free-running output on one of the three prompts on T4 and
+  on one on L4. The mean top-10 log-probability difference per prompt is 0.022 to 0.048; for the fork against
+  itself it is 0.026 to 0.049. This is a small sample, and no quality benchmark has been run.
+* On a short prompt, 24 of 24 greedy tokens agree with the fork on each of the three cards.
+* Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical, on all three
+  cards. Wider steps add the group sums in a different order, so int8 activations can round differently: single
+  kernels agree to 1e-6 or better, full logits to about 0.1. Attention agrees with a double-precision CPU
+  reference to 2e-6 (T4).
+* Speculative output equals plain greedy output for 1, 2 and 3 drafts on 3 prompts of 200 tokens, on all three
+  cards.
 * The tokenizer built from the GGUF agrees with the fork's on 7 test strings.
 
 ## How it works
 
 * **Decode.** Each 128-weight block is decoded once per row and dotted with the int8 activations of every
-  token in the step (`dp4a`), so one read of the weights serves several tokens. On a T4 a 4-token step costs
-  about 1.4x a 1-token step, which is where the MTP gain comes from.
+  token in the step (`dp4a`), so one read of the weights serves several tokens. A 4-token step costs 1.15x (L4)
+  to 1.4x (T4) a 1-token step, which is where the MTP gain comes from. Matmul blocks are small (256 or 512 rows) with
+  shared memory sized per launch, so many fit on an SM at once.
+* **Few launches.** The RMS norm factor is a scalar, so it is applied to the matmul output; that lets one kernel
+  do the residual add, sum of squares, Hadamard transform and quantisation. A 1-token step is about 640 launches.
 * **Prefill.** Steps of more than 8 tokens decode 64 rows of trits into shared memory and evaluate them
   against up to 128 tokens with the INT8 tensor-core instruction (`mma.sync`; m8n8k16 on Turing, m16n8k32 on
   Ampere and later). Attention shares KV reads across 8 tokens and evaluates the softmax online.
@@ -82,6 +91,7 @@ GGUF (no tools, no reasoning controls).
 
 Greedy only, one sequence, text only, context up to 8192, no KV quantization, no server. `build.sh` (the
 multi-architecture build) has not been run; the benchmarks compile one architecture at a time with the same
-flags. Correctness was checked on a T4; on L4 and A10/A10G only speed, VRAM and the first generated token were.
+flags. Correctness
+was checked on T4, L4 and A10 with the small tests above.
 
 `bench/` holds the Modal harnesses and `results/` the raw logs behind the numbers above.

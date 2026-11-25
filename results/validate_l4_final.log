@@ -1,0 +1,28 @@
+==========
+==========
+greedy agreement 24 / 24
+pos 0: max|dlogprob| 0.0529 mean 0.0149
+pos 1: max|dlogprob| 0.0391 mean 0.0165
+pos 2: max|dlogprob| 0.0487 mean 0.0190
+pos 3: max|dlogprob| 0.0411 mean 0.0248
+pos 4: max|dlogprob| 0.0367 mean 0.0184
+pos 5: max|dlogprob| 0.0809 mean 0.0275
+pos 6: max|dlogprob| 0.0261 mean 0.0122
+pos 7: max|dlogprob| 0.0864 mean 0.0341
+pos 8: max|dlogprob| 0.0601 mean 0.0247
+pos 9: max|dlogprob| 0.0471 mean 0.0313
+pos 10: max|dlogprob| 0.0274 mean 0.0150
+pos 11: max|dlogprob| 0.0408 mean 0.0098
+pos 12: max|dlogprob| 0.0342 mean 0.0144
+pos 13: max|dlogprob| 0.0893 mean 0.0460
+pos 14: max|dlogprob| 0.0451 mean 0.0225
+pos 15: max|dlogprob| 0.0502 mean 0.0259
+pos 16: max|dlogprob| 0.0256 mean 0.0088
+pos 17: max|dlogprob| 0.0802 mean 0.0315
+pos 18: max|dlogprob| 0.0385 mean 0.0173
+pos 19: max|dlogprob| 0.0468 mean 0.0145
+pos 20: max|dlogprob| 0.0446 mean 0.0201
+pos 21: max|dlogprob| 0.1317 mean 0.0343
+pos 22: max|dlogprob| 0.3499 mean 0.1007
+pos 23: max|dlogprob| 0.0676 mean 0.0322
+decode s/token 0.026490211486816406 -> 37.74979299420384 tok/s
