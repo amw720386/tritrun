@@ -46,11 +46,11 @@ def validate(n_gen=24):
     toks, gen, probs = ref_run(n_gen)
     print("prompt toks", len(toks), "ref gen", gen[:10], flush=True)
     lib = ctypes.CDLL("/tmp/libtritrun.so")
-    lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
     lib.tr_eval.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
     lib.tr_device_bytes.restype = ctypes.c_longlong; lib.tr_device_bytes.argtypes = [ctypes.c_void_p]
     t0 = time.time()
-    e = lib.tr_load(W.encode(), 4096)
+    e = lib.tr_load(W.encode(), 4096, 0)
     print("loaded", round(time.time()-t0, 1), "s; device GiB", lib.tr_device_bytes(e)/2**30, flush=True)
     nv = lib.tr_vocab(ctypes.c_void_p(e)) if False else 248320
     buf = (ctypes.c_float * nv)()

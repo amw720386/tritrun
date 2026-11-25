@@ -14,10 +14,10 @@ def body(gpu, prof, flags=""):
     if r.returncode: print(r.stderr[-3000:]); return
     if prof: os.environ["TR_PROF"] = "1"
     lib = ctypes.CDLL("/tmp/l.so")
-    lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int]
+    lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
     lib.tr_eval.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
     lib.tr_prof_dump.argtypes = [ctypes.c_int]
-    e = lib.tr_load(W.encode(), 4096)
+    e = lib.tr_load(W.encode(), 4096, 0)
     buf = (ctypes.c_float * 248320)()
     def ev(t, pos, w=True):
         a = (ctypes.c_int * 1)(t); lib.tr_eval(e, a, 1, pos, buf if w else None)
