@@ -38,7 +38,9 @@ def body(gpu, prof, flags=""):
         for w in range(3): step(pos + w * K, False)
         if prof: lib.tr_prof_dump(3)
         t0 = time.time(); m = 20
-        for s_ in range(m): step(pos + 100 + s_ * K, True)
+        for s_ in range(m):
+            step(pos + 100 + s_ * K, True)
+            if s_ == 10: print('clock under load (MHz, W):', subprocess.check_output('nvidia-smi --query-gpu=clocks.sm,power.draw,clocks_throttle_reasons.sw_power_cap --format=csv,noheader', shell=True, text=True).strip(), flush=True)
         ms = (time.time() - t0) / m * 1e3
         if prof: lib.tr_prof_dump(m)
         print(f"{gpu} K={K}: {ms:.2f} ms/step -> {ms/K:.2f} ms per verified token, {1000*K/ms:.1f} tok/s at full acceptance", flush=True)

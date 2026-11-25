@@ -301,147 +301,160 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
 // memory as digit words (same order as the activation planes) and every thread evaluates a 4 x 4 row/token subtile.
 // The integer sums are the decode kernel's; int->float uses the 1.5 * 2^23 trick so it costs one add.
 // ---------------------------------------------------------------------------------------------
-#ifndef TILE_RR
-#define TILE_RR 64
-#endif
 #ifndef TILE_CC
-#define TILE_CC 32
+#define TILE_CC 64
 #endif
-static const int TILE_R = TILE_RR, TILE_C = TILE_CC, TILE_NT = (TILE_RR / 4) * (TILE_CC / 4);   // threads: one 4 x 4 subtile each
+static const int TILE_R = 64, TILE_C = TILE_CC;                                   // rows x tokens per block
+static const int TILE_NT = 512;                                              // 16 warps: 4 row groups of 16 x 4 token groups of 8
 static const int F_MAGIC_I = 0x4B400000;
 #define F_MAGIC_F 12582912.0f
 
+// INT8 tensor-core product of a 16 x 32 weight fragment with a 32 x 8 activation fragment, accumulated into D (16 x 8 int32).
+// Fragment layouts are those of mma.sync m16n8k32 (Ampere+); Turing runs the same tile as four m8n8k16.
+__device__ __forceinline__ void mma_16x8x32(int (&D)[4], const u32 (&Af)[4], const u32 (&Bf)[2]) {
+#if __CUDA_ARCH__ >= 800
+    asm("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%0, %1, %2, %3};"
+        : "+r"(D[0]), "+r"(D[1]), "+r"(D[2]), "+r"(D[3])
+        : "r"(Af[0]), "r"(Af[1]), "r"(Af[2]), "r"(Af[3]), "r"(Bf[0]), "r"(Bf[1]));
+#else
+    asm("mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%0, %1}, {%2}, {%3}, {%0, %1};" : "+r"(D[0]), "+r"(D[1]) : "r"(Af[0]), "r"(Bf[0]));
+    asm("mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%0, %1}, {%2}, {%3}, {%0, %1};" : "+r"(D[2]), "+r"(D[3]) : "r"(Af[1]), "r"(Bf[0]));
+    asm("mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%0, %1}, {%2}, {%3}, {%0, %1};" : "+r"(D[0]), "+r"(D[1]) : "r"(Af[2]), "r"(Bf[1]));
+    asm("mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%0, %1}, {%2}, {%3}, {%0, %1};" : "+r"(D[2]), "+r"(D[3]) : "r"(Af[3]), "r"(Bf[1]));
+#endif
+}
+
+// shared layout: [sub-block][k & 3][row or token] of word pairs (k, k + 4), the two 16-wide halves of a fragment row, so one lane gets
+// both with a 64-bit load.  TPAD de-phases the four [k & 3] planes by 8 words to avoid bank conflicts between lanes.
+static const int TPAD = 4;
+#define TWI(sub, kp, row) (((sub) * 4 + (kp)) * (TILE_R + TPAD) + (row))
+#define TAI(sub, kp, tok) (((sub) * 4 + (kp)) * (TILE_C + TPAD) + (tok))
+
+struct TileRegs { u32 w0, w1, w2, w6; uint4 a0, a1; float dv; int bv; };
+
+static const int TPASS = TILE_C / 32;                                        // 32-token passes evaluated per decoded group
+// loader roles: weights of row (tid & 63), half (tid >> 6) for tid < 128; activations of sub-block (tid & 3) of token (tid >> 2) for tid < 4 TILE_C
+__device__ __forceinline__ void tile_fetch(TileRegs& r, const bool lw, const bool la, const u32* Wq, const uint4* A0, const float* d8, const int* sa,
+                                           int half_, int row, int G, int g, int tok, int qu) {
+#ifndef TILE_NOW
+    if (lw) {
+        r.w0 = Wq[(half_ ? 3 : 0) * CH + row]; r.w1 = Wq[(half_ ? 4 : 1) * CH + row]; r.w2 = Wq[(half_ ? 5 : 2) * CH + row];
+        if (!half_) r.w6 = Wq[6 * CH + row];
+    }
+#endif
+#ifndef TILE_NOA
+    if (la) {
+        r.a0 = A0[(size_t) g * 8]; r.a1 = A0[(size_t) g * 8 + 1];
+        r.dv = d8[((size_t) tok * G + g) * 4 + qu]; r.bv = F_MAGIC_I - sa[((size_t) tok * G + g) * 4 + qu];
+    }
+#endif
+}
+
+__device__ __forceinline__ void tile_decode(const TileRegs& r, const bool lw, const bool la0, u32* sW, u32* sA, float* sd, int* sb, float* sh,
+                                            int half_, int row, int tk, int qu) {
+#ifdef TILE_NOA
+    if (false) {
+#else
+    if (la0) {                                                  // also for tokens beyond K: zero activations, so every buffer entry is defined
+#endif
+        const u32 aw[8] = { r.a0.x, r.a0.y, r.a0.z, r.a0.w, r.a1.x, r.a1.y, r.a1.z, r.a1.w };
+#pragma unroll
+        for (int i = 0; i < 8; ++i) sA[TAI(qu, i & 3, tk) * 2 + (i >> 2)] = aw[i];
+        sd[qu * TILE_C + tk] = r.dv; sb[qu * TILE_C + tk] = r.bv;
+    }
+#ifdef TILE_NOW
+    return;
+#endif
+    if (!lw) return;
+    u32 l0 = r.w0 & 0x00FF00FFu, h0 = (r.w0 >> 8) & 0x00FF00FFu, l1 = r.w1 & 0x00FF00FFu, h1 = (r.w1 >> 8) & 0x00FF00FFu, l2 = r.w2 & 0x00FF00FFu, h2 = (r.w2 >> 8) & 0x00FF00FFu;
+#define TSW(w) sW[TWI((w) >> 3, (w) & 3, row) * 2 + (((w) & 7) >> 2)]
+#pragma unroll
+    for (int n = 0; n < 5; ++n) {
+        u32 D0, D1, D2;
+        DIGIT_STEP(l0, h0, D0) DIGIT_STEP(l1, h1, D1) DIGIT_STEP(l2, h2, D2)
+        if (!half_) { TSW(n * 4) = D0; TSW(n * 4 + 1) = D1; TSW(n * 4 + 2) = D2; }
+        else        { TSW(n * 4 + 3) = D0; TSW(20 + n * 2) = D1; TSW(20 + n * 2 + 1) = D2; }
+    }
+    if (!half_) {
+        u32 v = (r.w6 & 0xFFu) | ((r.w6 & 0xFF00u) << 8);
+        const u32 t0 = v * 3u; v = t0 & 0x00FF00FFu; const u32 t1 = v * 3u; v = t1 & 0x00FF00FFu; const u32 t2 = v * 3u; v = t2 & 0x00FF00FFu; const u32 t3 = v * 3u;
+        TSW(30) = __byte_perm(t0, t1, 0x7531); TSW(31) = __byte_perm(t2, t3, 0x7531);
+        sh[row] = __half2float(__ushort_as_half((unsigned short) (r.w6 >> 16)));
+    }
+#undef TSW
+}
+
 __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
-                                                          const int G, const int yrows, const int K) {
-    __shared__ __align__(16) u32 sW[TILE_R * 32];
-    __shared__ __align__(16) u32 sA[TILE_C * 32];
-    __shared__ __align__(16) float sd[TILE_C * 4];
-    __shared__ __align__(16) int sb[TILE_C * 4];
-    __shared__ float sh[TILE_R];
-    const int tid = threadIdx.x;
+                                                              const int G, const int yrows, const int K) {
+    // double buffered: while the block evaluates group g the loader threads decode group g + 1 into the other half
+    __shared__ __align__(16) u32 sW[2][16 * (TILE_R + TPAD) * 2];   // [sub-block][k & 3][row][pair]
+    __shared__ __align__(16) u32 sA[2][16 * (TILE_C + TPAD) * 2];   // [sub-block][k & 3][token][pair]
+    __shared__ __align__(16) float sd[2][4 * TILE_C];               // [sub-block][token]
+    __shared__ __align__(16) int sb[2][4 * TILE_C];
+    __shared__ float sh[2][TILE_R];
+    const int tid = threadIdx.x, lane = tid & 31, wi = tid >> 5;
+    const int rg = wi & 3;                                      // this warp's row group (16 rows); its token group is (wi >> 2) + 4 * pass
     const int row0 = blockIdx.x * TILE_R, tok0 = blockIdx.y * TILE_C;
     const u32* Wc = W + (size_t) (row0 / CH) * G * 7 * CH + (row0 % CH);
-    const bool is_w = tid < 2 * TILE_R, is_a = tid < 4 * TILE_C;  // loader roles
-    const int row = tid % TILE_R, half_ = tid / TILE_R;          // half 0 -> words 0,1,2,6; half 1 -> words 3,4,5
-    const int tk = tid >> 2, qu = tid & 3;                      // token, quarter of its 128-byte record
-    const bool tk_ok = is_a && tok0 + tk < K;
-    const int SR = TILE_R / 4, SC = TILE_C / 4;
-    // subtile: rows r4 + SR r, tokens c4 + SC c.  Shared arrays are [digit step][row or token] of 16-byte words, so the lanes of a
-    // warp read neighbouring words; with [row][step] every lane hits the same banks and the loads serialise
-    const int r4 = tid % SR, c4 = tid / SR;
+    // weight loaders: warps 0-3; activation loaders: warps 4-11 (4 TILE_C threads), so no warp carries both roles
+    const bool lw = tid < 128, la0 = tid >= 128 && tid < 128 + 4 * TILE_C;
+    const int ra = tid - 128;
+    const int row = tid & 63, half_ = (tid >> 6) & 1, tk = la0 ? ra >> 2 : 0, qu = la0 ? ra & 3 : 0;
+    const bool la = la0 && tok0 + tk < K;
+    const uint4* A0 = (const uint4*) A + ((size_t) (tok0 + tk) * G) * 8 + qu * 2;
+    TileRegs nxt;
+    nxt.w0 = nxt.w1 = nxt.w2 = nxt.w6 = 0; nxt.a0 = nxt.a1 = make_uint4(0, 0, 0, 0); nxt.dv = 0; nxt.bv = F_MAGIC_I;
+    tile_fetch(nxt, lw, la, Wc, A0, d8, sa, half_, row, G, 0, tok0 + tk, qu);
+    tile_decode(nxt, lw, la0, sW[0], sA[0], sd[0], sb[0], sh[0], half_, row, tk, qu);
+    if (G > 1) tile_fetch(nxt, lw, la, Wc + (size_t) 7 * CH, A0, d8, sa, half_, row, G, 1, tok0 + tk, qu);
+    __syncthreads();
 
-    float acc[4][4];
+    float acc[TPASS][4];                                        // [pass][row half * 2 + column]: rows 8u + lane/4, tokens 2(lane%4) + v
 #pragma unroll
-    for (int r = 0; r < 4; ++r)
-#pragma unroll
-        for (int c = 0; c < 4; ++c) acc[r][c] = 0.0f;
-
-    u32 w0 = 0, w1 = 0, w2 = 0, w6 = 0;
-    if (is_w) {
-        w0 = Wc[(half_ ? 3 : 0) * CH + row]; w1 = Wc[(half_ ? 4 : 1) * CH + row]; w2 = Wc[(half_ ? 5 : 2) * CH + row];
-        if (!half_) w6 = Wc[6 * CH + row];
-    }
-    // activations of the current group (prefetched like the weights)
-    const uint4* A0 = (const uint4*) A + ((size_t) (tok0 + (is_a ? tk : 0)) * G) * 8 + qu * 2;
-    uint4 ca0 = make_uint4(0, 0, 0, 0), ca1 = ca0; float cdv = 0; int cbv = F_MAGIC_I;
-    if (tk_ok) {
-        ca0 = A0[0]; ca1 = A0[1];
-        cdv = d8[((size_t) (tok0 + tk) * G) * 4 + qu]; cbv = F_MAGIC_I - sa[((size_t) (tok0 + tk) * G) * 4 + qu];
-    }
-
+    for (int p = 0; p < TPASS; ++p) acc[p][0] = acc[p][1] = acc[p][2] = acc[p][3] = 0.0f;
+    const int rA = rg * 16 + (lane >> 2), kA = lane & 3;
     for (int g = 0; g < G; ++g) {
-        // next group's weights are requested before this group's work
-        u32 n0 = 0, n1 = 0, n2 = 0, n6 = 0;
-        uint4 na0 = make_uint4(0, 0, 0, 0), na1 = na0; float ndv = 0; int nbv = F_MAGIC_I;
-        if (g + 1 < G && is_w) {
-            const u32* Wn = Wc + (size_t) (g + 1) * 7 * CH;
-            n0 = Wn[(half_ ? 3 : 0) * CH + row]; n1 = Wn[(half_ ? 4 : 1) * CH + row]; n2 = Wn[(half_ ? 5 : 2) * CH + row];
-            if (!half_) n6 = Wn[6 * CH + row];
+        const int b = g & 1;
+#ifndef TILE_NODEC
+        if (g + 1 < G && (lw || la0)) {                         // decode group g + 1 into the idle half, then request group g + 2
+            tile_decode(nxt, lw, la0, sW[b ^ 1], sA[b ^ 1], sd[b ^ 1], sb[b ^ 1], sh[b ^ 1], half_, row, tk, qu);
+            if (g + 2 < G) tile_fetch(nxt, lw, la, Wc + (size_t) (g + 2) * 7 * CH, A0, d8, sa, half_, row, G, g + 2, tok0 + tk, qu);
         }
-        if (g + 1 < G && tk_ok) {
-            na0 = A0[(size_t) (g + 1) * 8]; na1 = A0[(size_t) (g + 1) * 8 + 1];
-            ndv = d8[((size_t) (tok0 + tk) * G + g + 1) * 4 + qu]; nbv = F_MAGIC_I - sa[((size_t) (tok0 + tk) * G + g + 1) * 4 + qu];
-        }
-        // activations
-        if (is_a) {
-            ((uint4*) sA)[(qu * 2) * TILE_C + tk] = ca0; ((uint4*) sA)[(qu * 2 + 1) * TILE_C + tk] = ca1;
-            sd[tk * 4 + qu] = cdv; sb[tk * 4 + qu] = cbv;
-        }
-        // weights: 16-element steps of words 0..3, 8-element steps of words 4, 5, then the tail word
-        if (is_w) {
-#define SW(w) sW[(((w) >> 2) * TILE_R + row) * 4 + ((w) & 3)]
-        u32 l0 = w0 & 0x00FF00FFu, h0 = (w0 >> 8) & 0x00FF00FFu, l1 = w1 & 0x00FF00FFu, h1 = (w1 >> 8) & 0x00FF00FFu, l2 = w2 & 0x00FF00FFu, h2 = (w2 >> 8) & 0x00FF00FFu;
+#endif
+        float f[TPASS][4];
 #pragma unroll
-        for (int n = 0; n < 5; ++n) {
-            u32 D0, D1, D2;
-            DIGIT_STEP(l0, h0, D0) DIGIT_STEP(l1, h1, D1) DIGIT_STEP(l2, h2, D2)
-            if (!half_) { SW(n * 4) = D0; SW(n * 4 + 1) = D1; SW(n * 4 + 2) = D2; }
-            else        { SW(n * 4 + 3) = D0; SW(20 + n * 2) = D1; SW(20 + n * 2 + 1) = D2; }
-        }
-        if (!half_) {
-            u32 v = (w6 & 0xFFu) | ((w6 & 0xFF00u) << 8);
-            u32 t0 = v * 3u; v = t0 & 0x00FF00FFu; u32 t1 = v * 3u; v = t1 & 0x00FF00FFu; u32 t2 = v * 3u; v = t2 & 0x00FF00FFu; u32 t3 = v * 3u;
-            SW(30) = __byte_perm(t0, t1, 0x7531); SW(31) = __byte_perm(t2, t3, 0x7531);
-            sh[row] = __half2float(__ushort_as_half((unsigned short) (w6 >> 16)));
-        }
-        }
-        __syncthreads();
-
-        float f[4][4];
-#pragma unroll
-        for (int r = 0; r < 4; ++r)
-#pragma unroll
-            for (int c = 0; c < 4; ++c) f[r][c] = 0.0f;
+        for (int p = 0; p < TPASS; ++p) f[p][0] = f[p][1] = f[p][2] = f[p][3] = 0.0f;
 #pragma unroll
         for (int q = 0; q < 4; ++q) {
-            int a[4][4];
+            const uint2 a02 = ((const uint2*) sW[b])[TWI(q, kA, rA)], a13 = ((const uint2*) sW[b])[TWI(q, kA, rA + 8)];
+            const u32 Af[4] = { a02.x, a13.x, a02.y, a13.y };
 #pragma unroll
-            for (int c = 0; c < 4; ++c) {
-                const int b0 = sb[(c4 + SC * c) * 4 + q];
-#pragma unroll
-                for (int r = 0; r < 4; ++r) a[r][c] = b0;
-            }
-#pragma unroll
-            for (int h = 0; h < 2; ++h) {
-                uint4 wv[4], av[4];
-#pragma unroll
-                for (int r = 0; r < 4; ++r) wv[r] = ((const uint4*) sW)[(q * 2 + h) * TILE_R + r4 + SR * r];
-#pragma unroll
-                for (int c = 0; c < 4; ++c) av[c] = ((const uint4*) sA)[(q * 2 + h) * TILE_C + c4 + SC * c];
-#pragma unroll
-                for (int r = 0; r < 4; ++r)
-#pragma unroll
-                    for (int c = 0; c < 4; ++c) {
-                        a[r][c] = __dp4a((int) wv[r].x, (int) av[c].x, a[r][c]);
-                        a[r][c] = __dp4a((int) wv[r].y, (int) av[c].y, a[r][c]);
-                        a[r][c] = __dp4a((int) wv[r].z, (int) av[c].z, a[r][c]);
-                        a[r][c] = __dp4a((int) wv[r].w, (int) av[c].w, a[r][c]);
-                    }
-            }
-#pragma unroll
-            for (int c = 0; c < 4; ++c) {
-                const float ds = sd[(c4 + SC * c) * 4 + q];
-#pragma unroll
-                for (int r = 0; r < 4; ++r) f[r][c] += ds * (__int_as_float(a[r][c]) - F_MAGIC_F);
+            for (int p = 0; p < TPASS; ++p) {
+                const int tg = (wi >> 2) + 4 * p, tB = tg * 8 + (lane >> 2), tC = tg * 8 + 2 * (lane & 3);
+                const uint2 b01 = ((const uint2*) sA[b])[TAI(q, kA, tB)];
+                const u32 Bf[2] = { b01.x, b01.y };
+                const int2 bb = ((const int2*) sb[b])[(q * TILE_C + tC) >> 1];
+                int D[4] = { bb.x, bb.y, bb.x, bb.y };
+                mma_16x8x32(D, Af, Bf);
+                const float2 ds = ((const float2*) sd[b])[(q * TILE_C + tC) >> 1];
+                f[p][0] += ds.x * (__int_as_float(D[0]) - F_MAGIC_F); f[p][1] += ds.y * (__int_as_float(D[1]) - F_MAGIC_F);
+                f[p][2] += ds.x * (__int_as_float(D[2]) - F_MAGIC_F); f[p][3] += ds.y * (__int_as_float(D[3]) - F_MAGIC_F);
             }
         }
+        const float dh0 = sh[b][rA], dh1 = sh[b][rA + 8];
 #pragma unroll
-        for (int r = 0; r < 4; ++r) {
-            const float dh = sh[r4 + SR * r];
-#pragma unroll
-            for (int c = 0; c < 4; ++c) acc[r][c] += dh * f[r][c];
-        }
+        for (int p = 0; p < TPASS; ++p) { acc[p][0] += dh0 * f[p][0]; acc[p][1] += dh0 * f[p][1]; acc[p][2] += dh1 * f[p][2]; acc[p][3] += dh1 * f[p][3]; }
         __syncthreads();
-        w0 = n0; w1 = n1; w2 = n2; w6 = n6;
-        ca0 = na0; ca1 = na1; cdv = ndv; cbv = nbv;
     }
 #pragma unroll
-    for (int c = 0; c < 4; ++c) {
-        const int tok = tok0 + c4 + SC * c;
-        if (tok < K)
+    for (int p = 0; p < TPASS; ++p)
 #pragma unroll
-            for (int r = 0; r < 4; ++r) Y[(size_t) tok * yrows + row0 + r4 + SR * r] = acc[r][c];
-    }
+        for (int u = 0; u < 2; ++u)
+#pragma unroll
+            for (int v = 0; v < 2; ++v) {
+                const int tok = tok0 + ((wi >> 2) + 4 * p) * 8 + 2 * (lane & 3) + v;
+                if (tok < K) Y[(size_t) tok * yrows + row0 + rA + u * 8] = acc[p][u * 2 + v];
+            }
 }
 
 // token embedding rows (PTQ1_0, Hadamard-latent): decode, Hadamard, signs.  rows: [k][1120 bytes]
