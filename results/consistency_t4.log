@@ -1,0 +1,13 @@
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['2.3e-07', '2.3e-07', '2.0e-07', '2.0e-07', '2.0e-07', '1.9e-07'], 'B': ['2.6e-07', '2.1e-07', '2.1e-07', '1.7e-07', '1.7e-07', '1.7e-07'], 'C': ['2.3e-07', '2.2e-07', '2.2e-07', '2.8e-07', '2.8e-07', '2.5e-07'], 'D': ['3.5e-07', '3.1e-07', '4.1e-07', '3.3e-07', '3.3e-07', '3.2e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.0e-07', '2.9e-07', '2.9e-07', '2.9e-07', '2.9e-07', '2.9e-07'], 'B': ['5.9e-08', '2.1e-07', '2.8e-07', '2.8e-07', '2.8e-07', '2.8e-07'], 'C': ['2.7e-07', '3.4e-07', '3.4e-07', '3.4e-07', '3.4e-07', '3.2e-07'], 'D': ['4.2e-07', '3.8e-07', '3.4e-07', '3.8e-07', '3.8e-07', '3.0e-07']}
+wide attention vs per-token attention: {0: '1.21e-07', 5: '1.59e-07', 300: '5.41e-07', 511: '7.02e-07', 512: '6.98e-07', 1500: '1.20e-06', 3000: '2.35e-06'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.070269 same argmax 14/15
+K=33: positions 4 max|logit diff| 0.057466 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.068104 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.068104 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.094682 same argmax 41/42
+17+then 4s: positions 121 max|logit diff| 0.078993 same argmax 116/121

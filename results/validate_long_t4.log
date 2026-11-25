@@ -1,0 +1,12 @@
+fork ub=512 vs fork ub=64, prompt 300@0: same tokens for 7/32, mean |dlogprob| 0.0415 max 0.128
+fork ub=512 vs fork ub=64, prompt 1000@0: same tokens for 32/32, mean |dlogprob| 0.0486 max 0.295
+fork ub=512 vs fork ub=64, prompt 1000@2000: same tokens for 32/32, mean |dlogprob| 0.0263 max 0.152
+ours vs fork, prompt 300@0, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0503 median 0.0382 max 0.239
+ours vs fork, prompt 300@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0517 median 0.0401 max 0.294
+ours vs fork, prompt 300@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0517 median 0.0401 max 0.294
+ours vs fork, prompt 1000@0, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0478 median 0.0336 max 0.290
+ours vs fork, prompt 1000@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0498 median 0.0343 max 0.304
+ours vs fork, prompt 1000@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0498 median 0.0343 max 0.304
+ours vs fork, prompt 1000@2000, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0248 median 0.0207 max 0.106
+ours vs fork, prompt 1000@2000, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0286 median 0.0213 max 0.146
+ours vs fork, prompt 1000@2000, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0286 median 0.0213 max 0.146

@@ -1,4 +1,3 @@
-build ok /src/engine.cu(978): warning #177-D: variable "NV" was declared but never referenced
 greedy agreement 24 / 24
 pos 0: max|dlogprob| 0.0820 mean 0.0364
 pos 1: max|dlogprob| 0.0401 mean 0.0177
@@ -24,4 +23,4 @@ pos 20: max|dlogprob| 0.0694 mean 0.0272
 pos 21: max|dlogprob| 0.0915 mean 0.0404
 pos 22: max|dlogprob| 0.4343 mean 0.1165
 pos 23: max|dlogprob| 0.0815 mean 0.0442
-decode s/token 0.031027403744784268 -> 32.2295738381946 tok/s
+decode s/token 0.03129242766987194 -> 31.956612971987173 tok/s

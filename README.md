@@ -2,51 +2,69 @@
 
 A standalone CUDA inference engine for **Ternary-Bonsai-2.5-27B** (PTQ1_0 GGUF), aimed at bandwidth-bound
 cards. It uses less VRAM than the PrismML llama.cpp fork on every card tested, and decodes faster than it on
-the weakest one (T4) when the model's MTP draft head is on. On L4 and A10G the fork is faster.
+the weakest one (T4) when the model's MTP draft head is on. On L4 and A10G the fork decodes faster, and the
+fork is faster at prefilling long prompts everywhere.
 
 ## Results
 
 Fork: `prism-b12178-03ec600`, flash attention, FP16 KV, 4096 context, one slot. Both engines ran in the same
-container on the same GPU with the same prompt token ids: 4 short raw prompts, greedy, 200 new tokens,
-decode time only, 2 repetitions (the value shown is the mean). The fork column is its best setting among
-those tried: plain GGUF for plain decode, `-ub 512` and `-ub 64`, and MTP with 3 drafts at cut-off 0.1 and 0.
+container on the same GPU with the same prompt token ids.
+
+### Decode and VRAM
+
+4 short raw prompts, greedy, 200 new tokens, decode time only, mean of 2 repetitions. The fork column is its
+best setting among those tried: plain GGUF for plain decode, `-ub 512` and `-ub 64`, and MTP with 3 drafts at
+cut-off 0.1 and 0.
 
 | GPU | Plain tok/s, fork / ours | MTP tok/s, fork / ours | Plain VRAM MiB, fork `-ub 64` / ours | MTP VRAM MiB, fork `-ub 64` / ours |
 |---|---|---|---|---|
-| T4 | 32.9 / 31.7 (-3%) | 46.1 / **50.5 (+10%)** | 6038 / **5962** (-1%) | 6738 / **6382** (-5%) |
-| L4 | 37.0 / 34.9 (-6%) | 66.4 / 62.5 (-6%) | 6144 / **6052** (-1%) | 6852 / **6472** (-6%) |
-| A10G | 63.9 / 54.1 (-15%) | 107.5 / 83.4 (-22%) | 6220 / **6114** (-2%) | 6938 / **6534** (-6%) |
+| T4 | 32.8 / 31.6 (-4%) | 46.1 / **51.3 (+11%)** | 6038 / **6012** (-0.4%) | 6738 / **6384** (-5%) |
+| L4 | 36.3 / 34.2 (-6%) | 64.6 / 61.6 (-5%) | 6141 / **6099** (-0.7%) | 6849 / **6471** (-6%) |
+| A10G | 64.7 / 53.5 (-17%) | 109.2 / 84.4 (-23%) | 6219 / **6163** (-0.9%) | 6929 / **6535** (-6%) |
 
 VRAM is peak `nvidia-smi` memory. At the fork's default `-ub 512` its figures are 136 MiB higher in plain mode
-and 232 to 240 MiB higher with MTP.
+and 240 MiB higher with MTP.
 
-**Small cards.** With a ballast process leaving 5.86 GB free (a T4 standing in for a 6 GB card) at 1024
-context, plain mode runs at 28 tok/s here and 26 tok/s on the fork with `-ub 128`; the fork's default batch
-size does not fit. Both run at 6.0 GB free, neither at 5.6 GB, and MTP mode here does not fit in 6.0 GB.
-This is not a capability the fork lacks.
+### Prefill
 
-**Prefill is slower.** An 8-token step takes about 64 ms on a T4 (roughly 125 tok/s), against 350 tok/s for
-the fork's `llama-bench` pp512. Long prompts are a poor fit for this engine today.
+Real text, MTP off, best of 3, tok/s. Ours is the wall time of the whole prefill plus the first token; the
+fork's is its own `prompt_per_second` at its default batch size. The first generated token agreed in every
+case. Wide steps handle up to 128 tokens.
+
+| GPU | 64 tokens, fork / ours | 512 tokens, fork / ours | 2048 tokens, fork / ours |
+|---|---|---|---|
+| T4 | 206 / **226** | 326 / 249 (76%) | 336 / 240 (71%) |
+| L4 | 440 / **473** | 786 / 562 (71%) | 837 / 540 (64%) |
+| A10 | 499 / 496 | 896 / 578 (65%) | 924 / 560 (61%) |
+
+With MTP on, prefill here costs 1 to 4% more. Before the batched path existed, the T4 figures were 125 tok/s
+at 512 tokens and 109 at 2048.
 
 ## Validation
 
-* Against the fork: 24 of 24 greedy tokens agree on one prompt (teacher forced, T4). Top-10 log-probabilities
-  differ by 0.03 on average, worst case 0.43. This is a small sample, and no quality benchmark has been run.
-* Steps of 1, 2 and 4 tokens give bit-identical logits, and repeated runs are bit-identical.
+* Against the fork on real 300- and 1000-token prompts (T4): 96 of 96 teacher-forced greedy tokens agree.
+  The mean top-10 log-probability difference is 0.025 to 0.050, whether the prompt is prefilled in 128-token
+  steps or one token at a time. The fork compared with itself at two batch sizes differs by 0.026 to 0.049.
+  This is a small sample, and no quality benchmark has been run.
+* Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical. Wider steps
+  add the group sums in a different order, so int8 activations can round differently: single kernels agree
+  to 1e-6 or better, full logits to about 0.1.
 * Speculative output equals plain greedy output for 1, 2 and 3 drafts on 3 prompts of 200 tokens.
 * The tokenizer built from the GGUF agrees with the fork's on 7 test strings.
 
 ## How it works
 
-* Each 128-weight block is decoded once per row and dotted with the int8 activations of every token in the
-  step (`dp4a`), so one read of the weights serves several tokens. On a T4 a 4-token step costs about 1.4x a
-  1-token step, which is where the MTP gain comes from.
-* Rejected drafts roll back by replaying recorded layer inputs from a checkpoint of the recurrent state,
-  rather than keeping one state snapshot per token.
-* Token embeddings stay in host memory, and weights sit in one exactly sized allocation.
+* **Decode.** Each 128-weight block is decoded once per row and dotted with the int8 activations of every
+  token in the step (`dp4a`), so one read of the weights serves several tokens. On a T4 a 4-token step costs
+  about 1.4x a 1-token step, which is where the MTP gain comes from.
+* **Prefill.** Steps of more than 8 tokens decode 64 rows of trits into shared memory and evaluate them
+  against up to 128 tokens with the INT8 tensor-core instruction (`mma.sync`; m8n8k16 on Turing, m16n8k32 on
+  Ampere and later). Attention shares KV reads across 8 tokens and evaluates the softmax online.
+* **Rollback.** Rejected drafts are undone by replaying recorded layer inputs from a checkpoint of the
+  recurrent state, rather than keeping one state snapshot per token.
+* **Memory.** Token embeddings stay in host memory, and weights sit in one exactly sized allocation.
 
-The weights themselves do not compress further: the trits are uniformly distributed (1.585 bits of entropy),
-and a byte-lookup-table kernel was tried first and dropped because its cost grew with every extra token.
+The weights themselves do not compress further: the trits are uniformly distributed (1.585 bits of entropy).
 
 ## Build and run
 
@@ -64,6 +82,6 @@ GGUF (no tools, no reasoning controls).
 
 Greedy only, one sequence, text only, context up to 8192, no KV quantization, no server. `build.sh` (the
 multi-architecture build) has not been run; the benchmarks compile one architecture at a time with the same
-flags. The L4 and A10G rows were measured for speed and VRAM only; correctness was checked on a T4.
+flags. Correctness was checked on a T4; on L4 and A10/A10G only speed, VRAM and the first generated token were.
 
 `bench/` holds the Modal harnesses and `results/` the raw logs behind the numbers above.
