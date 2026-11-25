@@ -14,14 +14,19 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
+#include <chrono>
+#include <map>
 #include "gguf.hpp"
 
 typedef uint32_t u32;
 
 #define CK(x) do { cudaError_t _e = (x); if (_e != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #x, __FILE__, __LINE__, cudaGetErrorString(_e)); abort(); } } while (0)
 
-static const int NT = 256;            // threads per mvm block
-static const int RPT = 4;             // rows per thread
+#ifndef MVM_NT
+#define MVM_NT 256
+#endif
+static const int NT = MVM_NT;         // threads per mvm block
+static const int RPT = 1024 / MVM_NT;              // rows per thread
 static const int CH = NT * RPT;       // rows per chunk (1024)
 static const int KMAX = 4;            // tokens per step (verify width)
 static const int QMAX = 2047;         // activation quantisation level (12 bits)
@@ -127,8 +132,13 @@ __global__ void sumsq_kernel(const float* x, int n, float* irms) {
 // lookup-table matrix-vector product.  W layout: [chunk][G][7 words][1024 rows] (see gguf words per 128-weight block)
 // Y layout: [token k][part][yrows]
 // ---------------------------------------------------------------------------------------------
+#ifdef NOSYNC
+#define MVM_SYNC()
+#else
+#define MVM_SYNC() __syncthreads()
+#endif
 template <int K>
-__global__ __launch_bounds__(256, 1) void mvm_kernel(const u32* W, const short* X, const float* xs, float* Y,
+__global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const short* X, const float* xs, float* Y,
                                                      int G, int cols, int parts, int yrows) {
     __shared__ short T[K * 26 * 256];
     const int chunk = blockIdx.x, part = blockIdx.y, tid = threadIdx.x;
@@ -139,16 +149,27 @@ __global__ __launch_bounds__(256, 1) void mvm_kernel(const u32* W, const short* 
 #pragma unroll
         for (int k = 0; k < K; ++k) acc[j][k] = 0.0f;
     const u32* Wc = W + (size_t) chunk * G * 7 * CH;
-
-    for (int g = g0; g < g1; ++g) {
-        const u32* Wg = Wc + (size_t) g * 7 * CH;
-        // weight loads are issued first so they overlap the table build
-        u32 w[RPT][7];
+    u32 w[RPT][7], wn[RPT][7];
+    if (g0 < g1) {
+        const u32* Wg = Wc + (size_t) g0 * 7 * CH;
 #pragma unroll
         for (int j = 0; j < RPT; ++j)
 #pragma unroll
             for (int q = 0; q < 7; ++q) w[j][q] = Wg[q * CH + tid + j * NT];
+    }
 
+    for (int g = g0; g < g1; ++g) {
+        const bool have_next = g + 1 < g1;
+        // issue the NEXT group's weight loads now: they run while this group's tables are built and read
+        if (have_next) {
+            const u32* Wn = Wc + (size_t) (g + 1) * 7 * CH;
+#pragma unroll
+            for (int j = 0; j < RPT; ++j)
+#pragma unroll
+                for (int q = 0; q < 7; ++q) wn[j][q] = Wn[q * CH + tid + j * NT];
+        }
+
+#ifndef NOBUILD
         if (tid < 234) {
             const int b = tid / 9, r = tid - b * 9;
             const int d0 = r / 3, d1 = r - d0 * 3;
@@ -167,25 +188,35 @@ __global__ __launch_bounds__(256, 1) void mvm_kernel(const u32* W, const short* 
                 }
             }
         }
-        __syncthreads();
+#endif
+        MVM_SYNC();
 #pragma unroll
         for (int k = 0; k < K; ++k) {
             const float xsg = xs[(size_t) k * G + g];
 #pragma unroll
             for (int j = 0; j < RPT; ++j) {
                 int isum = 0;
+#ifndef NOLOOK
 #pragma unroll
                 for (int b = 0; b < 26; ++b) {
                     const u32 byte = (w[j][b >> 2] >> (8 * (b & 3))) & 0xFFu;
                     isum += T[k * 26 * 256 + b * 256 + byte];
                 }
+#else
+                isum = w[j][0] ^ w[j][1] ^ w[j][2] ^ w[j][3] ^ w[j][4] ^ w[j][5] ^ w[j][6];
+#endif
                 const half dh = __ushort_as_half((unsigned short) (w[j][6] >> 16));
                 acc[j][k] += __half2float(dh) * xsg * (float) isum;
             }
         }
-        __syncthreads();
-    }
+        MVM_SYNC();
+        if (have_next) {
 #pragma unroll
+            for (int j = 0; j < RPT; ++j)
+#pragma unroll
+                for (int q = 0; q < 7; ++q) w[j][q] = wn[j][q];
+        }
+    }
     for (int k = 0; k < K; ++k)
 #pragma unroll
         for (int j = 0; j < RPT; ++j)
@@ -396,6 +427,11 @@ static std::vector<float> to_f32(const gguf::Tensor& t) {
     return v;
 }
 
+static bool g_prof = getenv("TR_PROF") != nullptr;
+static std::map<std::string, std::pair<double, int>> g_times;
+#define PROF_BEGIN(st) std::chrono::steady_clock::time_point _t0; if (g_prof) { CK(cudaStreamSynchronize(st)); _t0 = std::chrono::steady_clock::now(); }
+#define PROF_END(st, name) if (g_prof) { CK(cudaStreamSynchronize(st)); auto& _r = g_times[name]; _r.first += std::chrono::duration<double>(std::chrono::steady_clock::now() - _t0).count(); _r.second++; }
+
 struct Engine {
     gguf::File f;
     int ctx = 4096, n_vocab = 248320;
@@ -414,9 +450,12 @@ struct Engine {
     float* dalloc(size_t n) { float* d; CK(cudaMalloc(&d, n * 4)); dev_bytes += n * 4; return d; }
 
     // fused matrix: rows of several tensors stacked, all sharing the same column count
+    int n_sm = 40;
+    int auto_parts(int chunks, int G, int lo) const { int want = (2 * n_sm + chunks - 1) / chunks; if (want < lo) want = lo; if (want > G) want = G; return want; }
     void load_mvm(Mvm& m, const std::vector<const gguf::Tensor*>& ts, int parts) {
         int rows = 0, cols = (int) ts[0]->ne[0]; for (auto* t : ts) rows += (int) t->ne[1];
-        m.rows = rows; m.cols = cols; m.parts = parts; m.chunks = (rows + CH - 1) / CH; m.yrows = m.chunks * CH;
+        m.rows = rows; m.cols = cols; m.chunks = (rows + CH - 1) / CH;
+        m.parts = auto_parts(m.chunks, cols / 128, parts); if (m.chunks > 100) m.parts = 1; m.yrows = m.chunks * CH;
         const int G = cols / 128;
         const size_t words = (size_t) m.chunks * G * 7 * CH;
         std::vector<u32> host(words, 0u);
@@ -446,6 +485,7 @@ struct Engine {
     void load(const char* path, int ctx_) {
         f.open(path);
         ctx = ctx_;
+        { cudaDeviceProp pr; int dev; CK(cudaGetDevice(&dev)); CK(cudaGetDeviceProperties(&pr, dev)); n_sm = pr.multiProcessorCount; }
         rope_base = (float) f.num("qwen35.rope.freq_base", 1e7);
         // signs
         const auto& vw = f.kv.at("prism.hadamard.sign_widths").nums; const auto& sv = f.kv.at("prism.hadamard.sign_values").nums;
@@ -465,20 +505,20 @@ struct Engine {
             y.attn_norm = upn(T("attn_norm.weight")); y.post_norm = upn(T("post_attention_norm.weight"));
             const bool recr = ((il + 1) % 4) != 0; y.recr = recr;
             if (recr) {
-                load_mvm(y.A, { T("attn_qkv.weight"), T("attn_gate.weight") }, 2);
-                load_mvm(y.B, { T("ssm_out.weight") }, 4);
+                load_mvm(y.A, { T("attn_qkv.weight"), T("attn_gate.weight") }, 1);
+                load_mvm(y.B, { T("ssm_out.weight") }, 1);
                 y.ssm_norm = upn(T("ssm_norm.weight")); y.dt_bias = upn(T("ssm_dt.bias")); y.ssm_a = upn(T("ssm_a")); y.conv_k = upn(T("ssm_conv1d.weight"));
                 y.wb = upn(T("ssm_beta.weight")); y.wa = upn(T("ssm_alpha.weight"));
                 CK(cudaMalloc(&y.conv_state, (size_t) 3 * QKV * 4)); CK(cudaMemset(y.conv_state, 0, (size_t) 3 * QKV * 4)); dev_bytes += (size_t) 3 * QKV * 4;
                 const size_t sbytes = (size_t) 48 * 128 * 128 * 4; CK(cudaMalloc(&y.gdn_state, sbytes)); CK(cudaMemset(y.gdn_state, 0, sbytes)); dev_bytes += sbytes;
             } else {
-                load_mvm(y.A, { T("attn_q.weight"), T("attn_k.weight"), T("attn_v.weight") }, 2);
-                load_mvm(y.B, { T("attn_output.weight") }, 4);
+                load_mvm(y.A, { T("attn_q.weight"), T("attn_k.weight"), T("attn_v.weight") }, 1);
+                load_mvm(y.B, { T("attn_output.weight") }, 1);
                 y.qnorm = upn(T("attn_q_norm.weight")); y.knorm = upn(T("attn_k_norm.weight"));
                 const size_t kvb = (size_t) 4 * ctx * 256 * 2; CK(cudaMalloc(&y.kc, kvb)); CK(cudaMalloc(&y.vc, kvb)); dev_bytes += 2 * kvb;
             }
             load_mvm(y.C, { T("ffn_gate.weight"), T("ffn_up.weight") }, 1);
-            load_mvm(y.D, { T("ffn_down.weight") }, 8);
+            load_mvm(y.D, { T("ffn_down.weight") }, 1);
             if ((il & 15) == 0) { fprintf(stderr, "layer %d loaded\n", il); fflush(stderr); }
         }
         { auto v = to_f32(f.get("output_norm.weight")); out_norm = upload_f32(v.data(), v.size()); }
@@ -486,7 +526,7 @@ struct Engine {
         n_vocab = out.rows;
         rx = dalloc((size_t) KMAX * D_MODEL); irms = dalloc(KMAX); X = nullptr;
         CK(cudaMalloc(&X, (size_t) KMAX * D_FF * sizeof(short))); xs = dalloc((size_t) KMAX * (D_FF / 128));
-        ybuf = dalloc((size_t) KMAX * 8 * 34816);                 // largest is parts*yrows per token (D: 8 parts x 5120 rows; A: 2x16384; C: 34816)
+        { size_t mx = 0; for (auto& y : L) for (Mvm* m : { &y.A, &y.B, &y.C, &y.D }) mx = std::max(mx, (size_t) m->parts * m->yrows); ybuf = dalloc((size_t) KMAX * mx); fprintf(stderr, "partial buffer %zu floats/token, SMs %d\n", mx, n_sm); }
         y_logits = dalloc((size_t) KMAX * out.yrows);
         qkv = dalloc((size_t) KMAX * QKV); gout = dalloc((size_t) KMAX * D_INNER); gated = dalloc((size_t) KMAX * D_INNER);
         Q = dalloc((size_t) KMAX * 24 * 256); gate = dalloc((size_t) KMAX * D_INNER); attn_out = dalloc((size_t) KMAX * D_INNER); g_raw = dalloc(KMAX * GATE96);
@@ -527,40 +567,40 @@ struct Engine {
     void mvm(Mvm& m, int K) {
         const int G = m.cols / 128;
         const dim3 grid(m.chunks, m.parts);
-        if (K == 1) mvm_kernel<1><<<grid, 256, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
-        else if (K == 2) mvm_kernel<2><<<grid, 256, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
-        else mvm_kernel<4><<<grid, 256, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
+        if (K == 1) mvm_kernel<1><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
+        else if (K == 2) mvm_kernel<2><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
+        else mvm_kernel<4><<<grid, NT, 0, st>>>(m.w, X, xs, ybuf, G, m.cols, m.parts, m.yrows);
     }
     void addres(Mvm& m, int K) {
-        const int blocks = (D_MODEL + 255) / 256 / 4 + 1;
         addres_kernel<<<dim3((D_MODEL + 1023) / 1024, K), 256, 0, st>>>(rx, ybuf, D_MODEL, m.parts, m.yrows, 0);
     }
     void sumsq(int K) { sumsq_kernel<<<dim3(K), 256, 0, st>>>(rx, D_MODEL, irms); }
 
     void layer(int il, int K, int pos) {
         Layer& y = L[il];
-        sumsq(K);
-        prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.attn_norm, 0, nullptr, K);
-        mvm(y.A, K);
+#define P(name, ...) { PROF_BEGIN(st); __VA_ARGS__; PROF_END(st, name); }
+        P("sumsq", sumsq(K));
+        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.attn_norm, 0, nullptr, K));
+        P("mvmA", mvm(y.A, K));
         if (y.recr) {
-            gate_kernel<<<dim3(96, K), 256, 0, st>>>(rx, irms, y.attn_norm, y.wb, y.wa, g_raw);
-            convqk_kernel<<<80, 128, 0, st>>>(ybuf, y.A.parts, y.A.yrows, y.conv_k, y.conv_state, qkv, K);
-            gdn_kernel<<<dim3(48, 16), 256, 0, st>>>(qkv, g_raw, y.dt_bias, y.ssm_a, y.gdn_state, gout, K);
-            gdnpost_kernel<<<dim3(48, K), 128, 0, st>>>(gout, y.ssm_norm, ybuf, y.A.parts, y.A.yrows, gated);
-            prep(2, gated, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K);
+            P("gate", (gate_kernel<<<dim3(96, K), 256, 0, st>>>(rx, irms, y.attn_norm, y.wb, y.wa, g_raw)));
+            P("convqk", (convqk_kernel<<<80, 128, 0, st>>>(ybuf, y.A.parts, y.A.yrows, y.conv_k, y.conv_state, qkv, K)));
+            P("gdn", (gdn_kernel<<<dim3(48, 16), 256, 0, st>>>(qkv, g_raw, y.dt_bias, y.ssm_a, y.gdn_state, gout, K)));
+            P("gdnpost", (gdnpost_kernel<<<dim3(48, K), 128, 0, st>>>(gout, y.ssm_norm, ybuf, y.A.parts, y.A.yrows, gated)));
+            P("prep_ssm", prep(2, gated, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K));
         } else {
-            attn_prep_kernel<<<dim3(32, K), 256, 0, st>>>(ybuf, y.A.parts, y.A.yrows, y.qnorm, y.knorm, Q, gate, y.kc, y.vc, ctx, pos, rope_base);
-            attn_kernel<<<dim3(24, K), 256, 0, st>>>(Q, gate, y.kc, y.vc, ctx, pos, attn_out);
-            prep(3, attn_out, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K);
+            P("attn_prep", (attn_prep_kernel<<<dim3(32, K), 256, 0, st>>>(ybuf, y.A.parts, y.A.yrows, y.qnorm, y.knorm, Q, gate, y.kc, y.vc, ctx, pos, rope_base)));
+            P("attn", (attn_kernel<<<dim3(24, K), 256, 0, st>>>(Q, gate, y.kc, y.vc, ctx, pos, attn_out)));
+            P("prep_wo", prep(3, attn_out, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K));
         }
-        mvm(y.B, K);
-        addres(y.B, K);
-        sumsq(K);
-        prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.post_norm, 0, nullptr, K);
-        mvm(y.C, K);
-        prep(1, nullptr, D_FF, D_FF, y.C.parts, y.C.yrows, signs[2], nullptr, D_FF, ybuf, K);
-        mvm(y.D, K);
-        addres(y.D, K);
+        P("mvmB", mvm(y.B, K));
+        P("addres", addres(y.B, K));
+        P("sumsq", sumsq(K));
+        P("prep_norm", prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], y.post_norm, 0, nullptr, K));
+        P("mvmC", mvm(y.C, K));
+        P("prep_swiglu", prep(1, nullptr, D_FF, D_FF, y.C.parts, y.C.yrows, signs[2], nullptr, D_FF, ybuf, K));
+        P("mvmD", mvm(y.D, K));
+        P("addres", addres(y.D, K));
     }
 
     // embeds: [K][5120] host floats.  logits_out: [K][n_vocab] host floats (may be null for a pure prompt step)
@@ -572,9 +612,9 @@ struct Engine {
         prep(0, rx, D_MODEL, D_MODEL, 0, 0, signs[0], out_norm, 0, nullptr, K);
         if (logits_out) {
             const int G = 40;
-            if (K == 1) mvm_kernel<1><<<dim3(out.chunks, 1), 256, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
-            else if (K == 2) mvm_kernel<2><<<dim3(out.chunks, 1), 256, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
-            else mvm_kernel<4><<<dim3(out.chunks, 1), 256, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
+            if (K == 1) mvm_kernel<1><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
+            else if (K == 2) mvm_kernel<2><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
+            else mvm_kernel<4><<<dim3(out.chunks, 1), NT, 0, st>>>(out.w, X, xs, y_logits, G, D_MODEL, 1, out.yrows);
             for (int k = 0; k < K; ++k) CK(cudaMemcpyAsync(logits_out + (size_t) k * n_vocab, y_logits + (size_t) k * out.yrows, (size_t) n_vocab * 4, cudaMemcpyDeviceToHost, st));
         }
         CK(cudaStreamSynchronize(st));
@@ -583,6 +623,12 @@ struct Engine {
 };
 
 extern "C" {
+void tr_prof_dump(int steps) {
+    double tot = 0; for (auto& kv : g_times) tot += kv.second.first;
+    fprintf(stderr, "kernel profile over %d steps (synchronised, launch latency included):\n", steps);
+    for (auto& kv : g_times) fprintf(stderr, "  %-12s %8.3f ms/step  %6.1f us/call  (%5.1f%%)\n", kv.first.c_str(), kv.second.first / steps * 1e3, kv.second.first / kv.second.second * 1e6, kv.second.first / tot * 100);
+    g_times.clear();
+}
 void* tr_load(const char* path, int ctx) { auto* e = new Engine(); e->load(path, ctx); return e; }
 int tr_vocab(void* p) { return ((Engine*) p)->n_vocab; }
 long long tr_device_bytes(void* p) { return (long long) ((Engine*) p)->dev_bytes; }

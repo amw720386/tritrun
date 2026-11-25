@@ -9,7 +9,7 @@ W = f"/w/{GGUF}"
 PROMPT = "Explain in three sentences why the sky is blue, and then write a small Python function that computes the nth Fibonacci number iteratively."
 
 def build(arch="sm_75"):
-    cmd = f"nvcc -O3 -std=c++17 -arch={arch} --use_fast_math -shared -fPIC -o /tmp/libtritrun.so /src/engine.cu"
+    cmd = f"nvcc -O3 -std=c++17 -arch={arch} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/libtritrun.so /src/engine.cu"
     print("$", cmd, flush=True)
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if r.returncode:
