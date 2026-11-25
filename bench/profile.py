@@ -29,16 +29,18 @@ def body(gpu, prof, flags=""):
     print(f"{gpu} prof={prof} K=1: {dt/n*1e3:.2f} ms/token = {n/dt:.2f} tok/s", flush=True)
     if prof: lib.tr_prof_dump(n)
     # K-token steps (verification width): time per step, not per token
-    for K in (2, 4):
+    for K in (4,):
         bufk = (ctypes.c_float * (248320 * K))()
         pos = 200
         def step(p, want):
             a = (ctypes.c_int * K)(*[3000 + p * 7 + q for q in range(K)])
-            lib.tr_eval(e, a, K, p, bufk if want else None)
+            lib.tr_eval(e, a, K, p, bufk if (want and K <= 4) else None)
         for w in range(3): step(pos + w * K, False)
+        if prof: lib.tr_prof_dump(3)
         t0 = time.time(); m = 20
         for s_ in range(m): step(pos + 100 + s_ * K, True)
         ms = (time.time() - t0) / m * 1e3
+        if prof: lib.tr_prof_dump(m)
         print(f"{gpu} K={K}: {ms:.2f} ms/step -> {ms/K:.2f} ms per verified token, {1000*K/ms:.1f} tok/s at full acceptance", flush=True)
     print(subprocess.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader", shell=True, capture_output=True, text=True).stdout)
 

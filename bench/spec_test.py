@@ -30,17 +30,17 @@ def body(max_new=200, ctx=4096, drafts=(0, 1, 2, 3)):
     print(gname, "device GiB", lib.tr_device_bytes(e) / 2**30, flush=True)
     refs = {}
     for D in drafts:
-        tot_t, tot_n, tot_r, tot_a, tot_d = 0, 0, 0, 0, 0
+        tot_t, tot_n, tot_r, tot_a, tot_d, tot_dec = 0, 0, 0, 0, 0, 0
         for pi, t in enumerate(toks):
-            arr = (ctypes.c_int * len(t))(*t); out = (ctypes.c_int * (max_new + 8))(); st = (ctypes.c_double * 4)()
+            arr = (ctypes.c_int * len(t))(*t); out = (ctypes.c_int * (max_new + 8))(); st = (ctypes.c_double * 5)()
             t0 = time.time()
             n = lib.tr_generate(e, arr, len(t), max_new, None, 0, D, out, st)
             dt = time.time() - t0
             seq = [out[i] for i in range(n)]
             if D == 0: refs[pi] = seq
             else: print(f"  D={D} prompt {pi}: match first-divergence at {next((i for i,(a,b) in enumerate(zip(seq, refs[pi])) if a != b), min(len(seq), len(refs[pi])))} of {len(seq)}", flush=True)
-            tot_t += dt; tot_n += n; tot_r += st[0]; tot_a += st[1]; tot_d += st[2]
-        print(f"D={D}: {tot_n} tokens in {tot_t:.2f}s (incl. prefill) = {tot_n/tot_t:.2f} tok/s; rounds {tot_r:.0f} accepted {tot_a:.0f} drafted {tot_d:.0f}" + (f"; accept rate {tot_a/max(1,tot_d):.2f}, tokens/round {1 + tot_a/max(1,tot_r):.2f}" if D else ""), flush=True)
+            tot_t += dt; tot_n += n; tot_dec += st[4]; tot_r += st[0]; tot_a += st[1]; tot_d += st[2]
+        print(f"D={D}: {tot_n} tokens in {tot_t:.2f}s (incl. prefill) = {tot_n/tot_t:.2f} tok/s; decode-only {(tot_n - len(toks)) / tot_dec:.2f} tok/s; rounds {tot_r:.0f} accepted {tot_a:.0f} drafted {tot_d:.0f}" + (f"; accept rate {tot_a/max(1,tot_d):.2f}, tokens/round {1 + tot_a/max(1,tot_r):.2f}" if D else ""), flush=True)
     print(subprocess.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader", shell=True, capture_output=True, text=True).stdout, flush=True)
 
 @app.function(gpu="T4", volumes={"/w": VOL}, timeout=1800, cpu=8, memory=24576)
