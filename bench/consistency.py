@@ -19,7 +19,7 @@ def run():
     lib.tr_test_tile.restype = ctypes.c_double; lib.tr_test_tile.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     lib.tr_test_attn.restype = ctypes.c_double; lib.tr_test_attn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     for il in (0, 3):
-        print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 37, 64, 128)] for w in range(4)}, flush=True)
+        print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 32, 37, 64)] for w in range(4)}, flush=True)
     print("wide attention vs per-token attention:", {L: f"{lib.tr_test_attn(e, 3, L, 37):.2e}" for L in (0, 5, 300, 511, 512, 1500, 3000)}, flush=True)
     toks = [1024 + (i * 37) % 4000 for i in range(200)]
     lib.tr_reset.argtypes = [ctypes.c_void_p]

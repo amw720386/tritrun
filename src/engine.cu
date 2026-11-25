@@ -26,7 +26,7 @@ typedef uint32_t u32;
 
 static const int CH = 1024;            // rows per chunk
 static const int KREC = 4;             // tokens per step that can be rolled back
-static const int KMAX = 128;         // tokens per step (prefill width)
+static const int KMAX = 64;          // tokens per step (prefill width)
 static const int KLOG = 4;           // tokens per step that can return logits (wider steps return the last token only)
 static const int D_MODEL = 5120, D_INNER = 6144, D_FF = 17408;
 static const int QKV = 10240, GATE96 = 96;
@@ -301,10 +301,7 @@ __global__ __launch_bounds__(NT, 1) void mvm_kernel(const u32* W, const signed c
 // memory as digit words (same order as the activation planes) and every thread evaluates a 4 x 4 row/token subtile.
 // The integer sums are the decode kernel's; int->float uses the 1.5 * 2^23 trick so it costs one add.
 // ---------------------------------------------------------------------------------------------
-#ifndef TILE_CC
-#define TILE_CC 128
-#endif
-static const int TILE_R = 64, TILE_C = TILE_CC;                                   // rows x tokens per block
+static const int TILE_R = 64;                                   // rows x tokens per block
 static const int TILE_NT = 512;                                              // 16 warps: 4 row groups of 16 x 4 token groups of 8
 static const int F_MAGIC_I = 0x4B400000;
 #define F_MAGIC_F 12582912.0f
@@ -328,11 +325,10 @@ __device__ __forceinline__ void mma_16x8x32(int (&D)[4], const u32 (&Af)[4], con
 // both with a 64-bit load.  TPAD de-phases the four [k & 3] planes by 8 words to avoid bank conflicts between lanes.
 static const int TPAD = 4;
 #define TWI(sub, kp, row) (((sub) * 4 + (kp)) * (TILE_R + TPAD) + (row))
-#define TAI(sub, kp, tok) (((sub) * 4 + (kp)) * (TILE_C + TPAD) + (tok))
+#define TAI(sub, kp, tok) (((sub) * 4 + (kp)) * (TC + TPAD) + (tok))
 
 struct TileW { u32 w0, w1, w2, w6; };
 struct TileA { uint4 a[4]; float dv[2]; int bv[2]; };                        // two sub-blocks of one token
-static const int TPASS = TILE_C / 32;                                        // 32-token passes evaluated per decoded group
 
 __device__ __forceinline__ void tile_fetch_w(TileW& r, const u32* Wq, int half_, int row) {
     r.w0 = Wq[(half_ ? 3 : 0) * CH + row]; r.w1 = Wq[(half_ ? 4 : 1) * CH + row]; r.w2 = Wq[(half_ ? 5 : 2) * CH + row];
@@ -367,6 +363,7 @@ __device__ __forceinline__ void tile_decode_w(const TileW& r, u32* sW, float* sh
 #undef TSW
 }
 // activations of sub-blocks 2 qp, 2 qp + 1 of token tk
+template <int TC>
 __device__ __forceinline__ void tile_decode_a(const TileA& r, u32* sA, float* sd, int* sb, int tk, int qp) {
 #pragma unroll
     for (int s_ = 0; s_ < 2; ++s_) {
@@ -374,7 +371,7 @@ __device__ __forceinline__ void tile_decode_a(const TileA& r, u32* sA, float* sd
         const u32 aw[8] = { r.a[2 * s_].x, r.a[2 * s_].y, r.a[2 * s_].z, r.a[2 * s_].w, r.a[2 * s_ + 1].x, r.a[2 * s_ + 1].y, r.a[2 * s_ + 1].z, r.a[2 * s_ + 1].w };
 #pragma unroll
         for (int i = 0; i < 8; ++i) sA[TAI(q, i & 3, tk) * 2 + (i >> 2)] = aw[i];
-        sd[q * TILE_C + tk] = r.dv[s_]; sb[q * TILE_C + tk] = r.bv[s_];
+        sd[q * TC + tk] = r.dv[s_]; sb[q * TC + tk] = r.bv[s_];
     }
 }
 __device__ __forceinline__ void tile_zero_a(TileA& r) {
@@ -383,22 +380,24 @@ __device__ __forceinline__ void tile_zero_a(TileA& r) {
     r.dv[0] = r.dv[1] = 0; r.bv[0] = r.bv[1] = F_MAGIC_I;
 }
 
+template <int TC>
 __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, const signed char* A, const float* d8, const int* sa, float* Y,
                                                               const int G, const int yrows, const int K) {
+    constexpr int TPASS = TC / 32;                              // 32-token passes evaluated per decoded group
     // weights are double buffered (group g + 1 is decoded while group g is evaluated); activations are single buffered and
     // refreshed between the two barriers of a group, which keeps two blocks resident per SM
     __shared__ __align__(16) u32 sW[2][16 * (TILE_R + TPAD) * 2];   // [sub-block][k & 3][row][pair]
-    __shared__ __align__(16) u32 sA[16 * (TILE_C + TPAD) * 2];      // [sub-block][k & 3][token][pair]
-    __shared__ __align__(16) float sd[4 * TILE_C];                  // [sub-block][token]
-    __shared__ __align__(16) int sb[4 * TILE_C];
+    __shared__ __align__(16) u32 sA[16 * (TC + TPAD) * 2];      // [sub-block][k & 3][token][pair]
+    __shared__ __align__(16) float sd[4 * TC];                  // [sub-block][token]
+    __shared__ __align__(16) int sb[4 * TC];
     __shared__ float sh[2][TILE_R];
     const int tid = threadIdx.x, lane = tid & 31, wi = tid >> 5;
     const int rg = wi & 3;                                      // this warp's row group (16 rows); its token group is (wi >> 2) + 4 * pass
-    const int row0 = blockIdx.x * TILE_R, tok0 = blockIdx.y * TILE_C;
+    const int row0 = blockIdx.x * TILE_R, tok0 = blockIdx.y * TC;
     const u32* Wc = W + (size_t) (row0 / CH) * G * 7 * CH + (row0 % CH);
-    // weight loaders: warps 0-3; activation loaders: the 2 TILE_C threads after them (two sub-blocks of one token each)
-    static_assert(128 + 2 * TILE_C <= TILE_NT, "not enough threads for the activation loaders");
-    const bool lw = tid < 128, la0 = tid >= 128 && tid < 128 + 2 * TILE_C;
+    // weight loaders: warps 0-3; activation loaders: the 2 TC threads after them (two sub-blocks of one token each)
+    static_assert(128 + 2 * TC <= TILE_NT, "not enough threads for the activation loaders");
+    const bool lw = tid < 128, la0 = tid >= 128 && tid < 128 + 2 * TC;
     const int ra = tid - 128;
     const int row = tid & 63, half_ = (tid >> 6) & 1, tk = la0 ? ra >> 1 : 0, qp = la0 ? ra & 1 : 0;
     const bool la = la0 && tok0 + tk < K;
@@ -407,7 +406,7 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
     TileA na; tile_zero_a(na);
     if (lw) { TileW w0r; tile_fetch_w(w0r, Wc, half_, row); tile_decode_w(w0r, sW[0], sh[0], half_, row); if (G > 1) tile_fetch_w(nw, Wc + (size_t) 7 * CH, half_, row); }
     if (la) { tile_fetch_a(na, A0, d8, sa, G, 0, tok0 + tk, qp); }
-    if (la0) { tile_decode_a(na, sA, sd, sb, tk, qp); }          // zero record when the token is absent
+    if (la0) { tile_decode_a<TC>(na, sA, sd, sb, tk, qp); }          // zero record when the token is absent
     if (la && G > 1) tile_fetch_a(na, A0, d8, sa, G, 1, tok0 + tk, qp);
     else if (la0) tile_zero_a(na);
     __syncthreads();
@@ -434,10 +433,10 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
                 const int tg = (wi >> 2) + 4 * p, tB = tg * 8 + (lane >> 2), tC = tg * 8 + 2 * (lane & 3);
                 const uint2 b01 = ((const uint2*) sA)[TAI(q, kA, tB)];
                 const u32 Bf[2] = { b01.x, b01.y };
-                const int2 bb = ((const int2*) sb)[(q * TILE_C + tC) >> 1];
+                const int2 bb = ((const int2*) sb)[(q * TC + tC) >> 1];
                 int D[4] = { bb.x, bb.y, bb.x, bb.y };
                 mma_16x8x32(D, Af, Bf);
-                const float2 ds = ((const float2*) sd)[(q * TILE_C + tC) >> 1];
+                const float2 ds = ((const float2*) sd)[(q * TC + tC) >> 1];
                 f[p][0] += ds.x * (__int_as_float(D[0]) - F_MAGIC_F); f[p][1] += ds.y * (__int_as_float(D[1]) - F_MAGIC_F);
                 f[p][2] += ds.x * (__int_as_float(D[2]) - F_MAGIC_F); f[p][3] += ds.y * (__int_as_float(D[3]) - F_MAGIC_F);
             }
@@ -447,7 +446,7 @@ __global__ __launch_bounds__(TILE_NT, 1) void mvm_tile_kernel(const u32* W, cons
         for (int p = 0; p < TPASS; ++p) { acc[p][0] += dh0 * f[p][0]; acc[p][1] += dh0 * f[p][1]; acc[p][2] += dh1 * f[p][2]; acc[p][3] += dh1 * f[p][3]; }
         __syncthreads();
         if (g + 1 < G) {
-            if (la0) tile_decode_a(na, sA, sd, sb, tk, qp);     // group g + 1 (zeros for absent tokens)
+            if (la0) tile_decode_a<TC>(na, sA, sd, sb, tk, qp);     // group g + 1 (zeros for absent tokens)
             if (la && g + 2 < G) tile_fetch_a(na, A0, d8, sa, G, g + 2, tok0 + tk, qp);
         }
         __syncthreads();
@@ -859,7 +858,7 @@ __global__ void q4mv_kernel(const u32* nib, const half* sc, const float* x, floa
 // ---------------------------------------------------------------------------------------------
 struct Mvm { u32* w = nullptr; int rows = 0, cols = 0, chunks = 0, parts = 1, yrows = 0; size_t bytes = 0; };
 
-// device allocator: one exactly-sized arena for the weights and 64 MB slabs for the rest, because many separate
+// device allocator: one exactly-sized arena for the weights and 8 MB slabs for the rest, because many separate
 // cudaMalloc calls waste up to 2 MB each
 struct Pool {
     char* base = nullptr; size_t cap = 0, used = 0, total = 0;
@@ -868,8 +867,8 @@ struct Pool {
     void* take(size_t n) {
         n = (n + 255) & ~(size_t) 255;
         if (used + n > cap) {
-            if (n > (size_t) (48u << 20)) { char* q; CK(raw((void**) &q, n)); total += n; return q; }
-            const size_t c = (size_t) 64 << 20; CK(raw((void**) &base, c)); cap = c; used = 0; total += c;
+            if (n > (size_t) (6u << 20)) { char* q; CK(raw((void**) &q, n)); total += n; return q; }
+            const size_t c = (size_t) 8 << 20; CK(raw((void**) &base, c)); cap = c; used = 0; total += c;
         }
         char* q = base + used; used += n; return q;
     }
@@ -1073,7 +1072,8 @@ struct Engine {
         { size_t mx = 0; for (auto& y : L) for (Mvm* m : { &y.A, &y.B, &y.C, &y.D }) for (int k : { 4, 8, KMAX }) mx = std::max(mx, (size_t) eff_parts(*m, k) * m->yrows * k); ybuf = dalloc(mx); }
         y_logits = dalloc((size_t) KLOG * out.yrows);
         qkv = dalloc((size_t) KMAX * QKV); gout = dalloc((size_t) KMAX * D_INNER); gated = dalloc((size_t) KMAX * D_INNER);
-        Q = dalloc((size_t) KMAX * 24 * 256); gate = dalloc((size_t) KMAX * D_INNER); attn_out = dalloc((size_t) KMAX * D_INNER);
+        // attention layers use the recurrent layers' scratch (24 x 256 = 6144 = D_INNER values per token each)
+        Q = gout; gate = gated; attn_out = qkv;
         hlast = dalloc((size_t) KMAX * D_MODEL);
         CK(cudaMalloc(&am, (size_t) KMAX * sizeof(ssq_t))); CK(cudaHostAlloc(&am_host, (size_t) KMAX * sizeof(ssq_t), cudaHostAllocDefault));
                 CK(cudaHostAlloc(&logits_host, (size_t) KLOG * n_vocab * 4, cudaHostAllocDefault));
@@ -1144,7 +1144,8 @@ struct Engine {
         else if (K == 2) mvm_kernel<2, 512><<<grid, 512, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
         else if (K <= 4) mvm_kernel<4, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
         else if (K <= 8) mvm_kernel<8, 256><<<grid, 256, 0, st>>>(w, A, d8, sa, y, G, cols, parts, yrows);
-        else mvm_tile_kernel<<<dim3(yrows / TILE_R, (K + TILE_C - 1) / TILE_C), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
+        else if (K <= 32) mvm_tile_kernel<32><<<dim3(yrows / TILE_R, 1), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
+        else mvm_tile_kernel<64><<<dim3(yrows / TILE_R, (K + 63) / 64), TILE_NT, 0, st>>>(w, A, d8, sa, y, G, yrows, K);
     }
     void mvm(Mvm& m, int K) {
         const int G = m.cols / 128;
