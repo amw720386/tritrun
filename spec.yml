@@ -3,7 +3,7 @@
 project:
   name: tritrun
   emoji: "🌳"
-  tagline: A Ternary-Bonsai-2.5-27B engine that's faster than PrismML's own, on every card we tested.
+  tagline: A Ternary Bonsai engine that's faster than PrismML's.
   repo: amw720386/tritrun
 hero:
   title: tritrun

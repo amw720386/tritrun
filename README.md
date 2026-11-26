@@ -4,7 +4,7 @@
 
 # 🌳 tritrun
 
-**A Ternary-Bonsai-2.5-27B engine that's faster than PrismML's own, on every card we tested.**
+**A Ternary Bonsai engine that's faster than PrismML's.**
 
 ![model: Ternary-Bonsai-2.5-27B](https://img.shields.io/badge/model-Ternary--Bonsai--2.5--27B-6f42c1) ![format: PTQ1_0 GGUF](https://img.shields.io/badge/format-PTQ1__0%20GGUF-blue) ![GPU: T4 · L4 · A10 · RTX 5090](https://img.shields.io/badge/GPU-T4%20%C2%B7%20L4%20%C2%B7%20A10%20%C2%B7%20RTX%205090-76b900)
 
