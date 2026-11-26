@@ -2,7 +2,7 @@
 
 A standalone CUDA inference engine for **Ternary-Bonsai-2.5-27B** (PTQ1_0 GGUF), aimed at bandwidth-bound
 cards. On the cards tested (T4, L4, A10) it decodes and prefills faster than the PrismML llama.cpp fork and uses
-less VRAM.
+less VRAM. On an RTX 5090 it prefills faster and decodes faster with MTP, but plain decode is 2% behind the fork.
 
 ## Results
 
@@ -48,6 +48,24 @@ this container are lower than in an earlier one (329 at 2048 tokens), and T4 con
 the T4 margin is the least certain. The previous version of this engine reached 250, 556 and 598 tok/s at 2048
 tokens (T4, L4, A10), and the first batched version 109 on T4.
 
+### RTX 5090
+
+Same benchmarks on one rented RTX 5090 (sm_120, CUDA 12.8, fork's CUDA 12.8 build), both engines on the same
+machine. Logs in `results/rtx5090.log`; the scripts ran outside Modal through `bench/vast/`.
+
+| | Fork | Ours |
+|---|---|---|
+| Plain decode, tok/s | 171.8 | 168.0 (-2%) |
+| MTP decode, tok/s | 248.5 | **317.4 (+28%)** |
+| Plain VRAM, MiB (fork `-ub 64`) | 6560 | **6414** |
+| MTP VRAM, MiB (fork `-ub 64`) | 7284 | **6786** |
+| Prefill, 64 / 512 / 2048 tokens, tok/s | 485 / 2994 / 3360 | **3483 / 4219 (+41%) / 3918 (+17%)** |
+
+Plain decode is the one loss. A token takes 6.1 ms; reading the weights at the measured 1.65 TB/s takes about
+3.5 ms, and each of the several hundred kernel launches per token costs about 2.9 us on this card, so launch
+overhead, not bandwidth, is what is left. llama.cpp normally replays decode steps as CUDA graphs, which cuts
+that cost; this engine launches each kernel separately.
+
 ## Validation
 
 * Against the fork on real 300- and 1000-token prompts, teacher-forced greedy tokens that agree, out of 96, for
@@ -56,8 +74,9 @@ tokens (T4, L4, A10), and the first batched version 109 on T4.
   on one on L4. The mean top-10 log-probability difference per prompt is 0.022 to 0.048; for the fork against
   itself it is 0.026 to 0.049. The quality section below uses larger samples.
 * On a short prompt, 24 of 24 greedy tokens agree with the fork on each of the three cards.
-* Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical, on all three
-  cards. Wider steps add the group sums in a different order, so int8 activations can round differently: single
+* Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical, on T4, L4, A10
+  and RTX 5090. (On the 5090 this first failed: under `--use_fast_math` the RMS scale's `1/sqrtf` compiled to
+  different instruction sequences in different kernels; it now uses the correctly rounded `__frsqrt_rn`.) Wider steps add the group sums in a different order, so int8 activations can round differently: single
   kernels agree to 1e-6 or better, full logits to about 0.1. Attention agrees with a double-precision CPU
   reference to 2e-6 for steps of up to 8 tokens and to 3e-4 for wider steps, whose attention uses FP16 queries
   and probabilities (T4).
@@ -136,7 +155,7 @@ The weights themselves do not compress further: the trits are uniformly distribu
 
 ## Build and run
 
-Linux, NVIDIA GPU, CUDA 12 toolkit, Python 3.10+ with `pip install -r requirements.txt`.
+Linux, NVIDIA GPU (Turing or newer), CUDA 12 toolkit (12.8 or newer for RTX 50-series), Python 3.10+ with `pip install -r requirements.txt`.
 
 ```bash
 bash build.sh
@@ -149,8 +168,9 @@ GGUF (no tools, no reasoning controls).
 ## Limits
 
 Greedy only, one sequence, text only, context up to 8192, no KV quantization, no server. `build.sh` (the
-multi-architecture build) has not been run; the benchmarks compile one architecture at a time with the same
-flags. Correctness
-was checked on T4, L4 and A10 with the tests above.
+multi-architecture build) was run on the RTX 5090 machine with CUDA 12.8 and produced code for sm_75 to sm_120;
+the benchmarks compile one architecture at a time with the same flags. Correctness was checked on T4, L4, A10
+and RTX 5090 with the tests above (the 5090: bit-identity, speculative = greedy, long prompts against the fork;
+not the quality benchmarks). Other Blackwell parts (B200, sm_100) and H100 were not tested.
 
 `bench/` holds the Modal harnesses and `results/` the raw logs behind the numbers above.

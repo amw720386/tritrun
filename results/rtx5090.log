@@ -1,0 +1,162 @@
+# o_build.log
+ELF file    1: libtritrun.1.sm_75.cubin
+ELF file    2: libtritrun.2.sm_86.cubin
+ELF file    3: libtritrun.3.sm_89.cubin
+ELF file    4: libtritrun.4.sm_90.cubin
+ELF file    5: libtritrun.5.sm_120.cubin
+ELF file    6: libtritrun.6.sm_75.cubin
+ELF file    7: libtritrun.7.sm_86.cubin
+ELF file    8: libtritrun.8.sm_89.cubin
+ELF file    9: libtritrun.9.sm_90.cubin
+ELF file   10: libtritrun.10.sm_120.cubin
+# o_consistency.log
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.2e-07', '3.2e-07', '3.0e-07', '3.0e-07', '5.0e-07', '4.8e-07'], 'B': ['3.0e-07', '2.5e-07', '2.9e-07', '2.5e-07', '1.7e-07', '1.7e-07'], 'C': ['5.7e-07', '5.4e-07', '5.4e-07', '5.3e-07', '5.3e-07', '5.6e-07'], 'D': ['1.8e-07', '2.0e-07', '2.0e-07', '2.9e-07', '2.9e-07', '4.0e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.3e-07', '3.9e-07', '3.9e-07', '3.9e-07', '6.3e-07', '6.3e-07'], 'B': ['1.3e-07', '2.1e-07', '1.9e-07', '1.9e-07', '1.4e-07', '1.9e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['2.7e-07', '2.7e-07', '3.0e-07', '2.8e-07', '4.1e-07', '3.3e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.5e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.7e-04', 512: '2.7e-04', 513: '2.7e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.9e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.092753 same argmax 134/140
+K=8: positions 17 max|logit diff| 0.077452 same argmax 16/17
+K=9: positions 15 max|logit diff| 0.073637 same argmax 14/15
+K=33: positions 4 max|logit diff| 0.057404 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.075283 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.059791 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.071695 same argmax 40/42
+17+then 4s: positions 121 max|logit diff| 0.077584 same argmax 118/121
+# o_exp.log
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.2e-07', '3.2e-07', '3.0e-07', '3.0e-07', '5.0e-07', '4.8e-07'], 'B': ['3.0e-07', '2.5e-07', '2.9e-07', '2.5e-07', '1.7e-07', '1.7e-07'], 'C': ['5.7e-07', '5.4e-07', '5.4e-07', '5.3e-07', '5.3e-07', '5.6e-07'], 'D': ['1.8e-07', '2.0e-07', '2.0e-07', '2.9e-07', '2.9e-07', '4.0e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.3e-07', '3.9e-07', '3.9e-07', '3.9e-07', '6.3e-07', '6.3e-07'], 'B': ['1.3e-07', '2.1e-07', '1.9e-07', '1.9e-07', '1.4e-07', '1.9e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['2.7e-07', '2.7e-07', '3.0e-07', '2.8e-07', '4.1e-07', '3.3e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.5e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.7e-04', 512: '2.7e-04', 513: '2.7e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.9e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.070068 same argmax 14/15
+K=33: positions 4 max|logit diff| 0.055359 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.066891 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.063493 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.085400 same argmax 40/42
+17+then 4s: positions 121 max|logit diff| 0.088507 same argmax 116/121
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.4e-07', '3.4e-07', '3.0e-07', '3.0e-07', '4.5e-07', '4.8e-07'], 'B': ['8.6e-08', '2.1e-07', '2.9e-07', '2.5e-07', '1.7e-07', '1.7e-07'], 'C': ['5.7e-07', '5.4e-07', '5.4e-07', '5.3e-07', '5.3e-07', '5.6e-07'], 'D': ['1.8e-07', '2.6e-07', '2.6e-07', '2.5e-07', '2.5e-07', '4.0e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.5e-07', '3.9e-07', '3.9e-07', '3.9e-07', '6.3e-07', '6.3e-07'], 'B': ['2.5e-07', '2.2e-07', '2.0e-07', '2.0e-07', '2.3e-07', '2.3e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['3.2e-07', '3.0e-07', '3.8e-07', '3.5e-07', '3.5e-07', '3.2e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.2e-07', 300: '5.5e-07', 511: '7.4e-07', 512: '7.0e-07', 513: '7.0e-07', 1500: '1.0e-06', 3000: '1.4e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '9.7e-08', 5: '1.9e-07', 300: '4.8e-07', 511: '6.9e-07', 512: '7.0e-07', 513: '7.0e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.5e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.7e-04', 512: '2.7e-04', 513: '2.7e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.9e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.098429 same argmax 134/140
+K=8: positions 17 max|logit diff| 0.086102 same argmax 16/17
+K=9: positions 15 max|logit diff| 0.068766 same argmax 13/15
+K=33: positions 4 max|logit diff| 0.070168 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.062258 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.068981 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.080515 same argmax 40/42
+17+then 4s: positions 121 max|logit diff| 0.090832 same argmax 115/121
+# o_spec.log
+D=0: 600 tokens in 3.57s (incl. prefill) = 168.07 tok/s; decode-only 169.21 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 2.21s (incl. prefill) = 271.39 tok/s; decode-only 275.24 tok/s; rounds 327 accepted 271 drafted 327; accept rate 0.83, tokens/round 1.83
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 2.04s (incl. prefill) = 294.34 tok/s; decode-only 298.92 tok/s; rounds 247 accepted 353 drafted 494; accept rate 0.71, tokens/round 2.43
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 1.84s (incl. prefill) = 325.26 tok/s; decode-only 331.07 tok/s; rounds 206 accepted 392 drafted 618; accept rate 0.63, tokens/round 2.90
+# o_validate_long.log
+fork ub=512 vs fork ub=64, prompt 300@0: same tokens for 32/32, mean |dlogprob| 0.0435 max 0.215
+fork ub=512 vs fork ub=64, prompt 1000@0: same tokens for 32/32, mean |dlogprob| 0.0453 max 0.238
+fork ub=512 vs fork ub=64, prompt 1000@2000: same tokens for 32/32, mean |dlogprob| 0.0296 max 0.147
+ours vs fork, prompt 300@0, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0425 median 0.0370 max 0.188
+ours vs fork, prompt 300@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0448 median 0.0337 max 0.240
+ours vs fork, prompt 300@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0459 median 0.0339 max 0.270
+ours vs fork, prompt 1000@0, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0458 median 0.0323 max 0.195
+ours vs fork, prompt 1000@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0474 median 0.0369 max 0.248
+ours vs fork, prompt 1000@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0473 median 0.0353 max 0.310
+ours vs fork, prompt 1000@2000, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0254 median 0.0194 max 0.120
+ours vs fork, prompt 1000@2000, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0258 median 0.0195 max 0.177
+ours vs fork, prompt 1000@2000, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0247 median 0.0180 max 0.155
+# o_paired.log
+GPU NVIDIA GeForce RTX 5090, 32607 MiB
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain: {"decode_tps": 171.5881729420036, "prefill_tps": 116.15393335003337, "vram_mib": 6696}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain_ub64: {"decode_tps": 171.33343242116842, "prefill_tps": 119.17000246954704, "vram_mib": 6560}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_plain: {"decode_tps": 168.45278897663334, "prefill_tps": 1524.4506409853952, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6414}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 248.04963225091709, "prefill_tps": 95.47110388751433, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0: {"decode_tps": 248.3972940840769, "prefill_tps": 95.32034526636868, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 248.29498934504124, "prefill_tps": 102.48684957893957, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_mtp3: {"decode_tps": 318.7571731501439, "prefill_tps": 1526.883984878183, "accept": 0.6, "tok_per_round": 2.8, "vram_mib": 6786}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain: {"decode_tps": 171.5953130456195, "prefill_tps": 117.56740295023357, "vram_mib": 6696}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain_ub64: {"decode_tps": 171.05043999518495, "prefill_tps": 119.23608457429843, "vram_mib": 6560}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_plain: {"decode_tps": 168.50626226861206, "prefill_tps": 1526.3857196960946, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6414}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 247.8478288685096, "prefill_tps": 95.2899224592607, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0: {"decode_tps": 247.6447437093592, "prefill_tps": 94.41409795860794, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 247.3490366991766, "prefill_tps": 102.2102032874742, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_mtp3: {"decode_tps": 318.77902456236797, "prefill_tps": 1525.211831965251, "accept": 0.6, "tok_per_round": 2.8, "vram_mib": 6786}
+SUMMARY {"fork_plain": {"decode_tps": 171.5953130456195, "prefill_tps": 117.56740295023357, "vram_mib": 6696}, "fork_plain_ub64": {"decode_tps": 171.33343242116842, "prefill_tps": 119.23608457429843, "vram_mib": 6560}, "ours_plain": {"decode_tps": 168.50626226861206, "prefill_tps": 1526.3857196960946, "vram_mib": 6414}, "fork_mtp_p0.1": {"decode_tps": 248.04963225091709, "prefill_tps": 95.47110388751433, "vram_mib": 7524}, "fork_mtp_p0": {"decode_tps": 248.3972940840769, "prefill_tps": 95.32034526636868, "vram_mib": 7524}, "fork_mtp_p0_ub64": {"decode_tps": 248.29498934504124, "prefill_tps": 102.48684957893957, "vram_mib": 7284}, "ours_mtp3": {"decode_tps": 318.77902456236797, "prefill_tps": 1526.883984878183, "vram_mib": 6786}}
+# o_prefill.log
+GPU NVIDIA GeForce RTX 5090 tokens 2048
+[NVIDIA GeForce RTX 5090] ours mtp=0: {"64": {"tps": 3440.9067206747595, "first": 11}, "512": {"tps": 4203.688405953134, "first": 406}, "2048": {"tps": 3908.833207588382, "first": 466}}
+[NVIDIA GeForce RTX 5090] ours mtp=1: {"64": {"tps": 3386.471747385419, "first": 11}, "512": {"tps": 4095.320425268176, "first": 406}, "2048": {"tps": 3795.220279973632, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=0: {"64": {"tps": 536.4492091565174, "first": 11}, "512": {"tps": 3078.5511568618017, "first": 406}, "2048": {"tps": 3409.032270951483, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=1: {"64": {"tps": 411.6602773561119, "first": 11}, "512": {"tps": 1925.8473540286693, "first": 406}, "2048": {"tps": 2550.254838697627, "first": 466}}
+# o_launch.log
+empty kernel, 1 blocks: enqueue 2.91 us, total 2.91 us per launch
+empty kernel, 40 blocks: enqueue 2.92 us, total 2.92 us per launch
+empty kernel, 160 blocks: enqueue 2.89 us, total 2.89 us per launch
+read bandwidth GB/s: one kernel 1693, 64 kernels 1638, 256 kernels 1511
+MTP draft row: 0.43 ms
+K=1: enqueue 1.95 ms, step 6.10 ms (6.10 per token)
+K=4: enqueue 2.09 ms, step 7.57 ms (1.89 per token)
+# o_spec2.log
+D=0: 600 tokens in 3.58s (incl. prefill) = 167.41 tok/s; decode-only 168.52 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 2.21s (incl. prefill) = 271.76 tok/s; decode-only 275.56 tok/s; rounds 324 accepted 275 drafted 324; accept rate 0.85, tokens/round 1.85
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 2.03s (incl. prefill) = 296.13 tok/s; decode-only 300.72 tok/s; rounds 246 accepted 355 drafted 492; accept rate 0.72, tokens/round 2.44
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 1.85s (incl. prefill) = 324.32 tok/s; decode-only 329.98 tok/s; rounds 207 accepted 392 drafted 621; accept rate 0.63, tokens/round 2.89
+# o_paired2.log
+GPU NVIDIA GeForce RTX 5090, 32607 MiB
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain: {"decode_tps": 171.8120067384669, "prefill_tps": 110.24186800196577, "vram_mib": 6696}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain_ub64: {"decode_tps": 171.43399609001912, "prefill_tps": 109.76164531383897, "vram_mib": 6560}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_plain: {"decode_tps": 167.9922071015206, "prefill_tps": 1553.187323240577, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6414}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 247.82471853307592, "prefill_tps": 89.99006856592695, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0: {"decode_tps": 248.10979106364354, "prefill_tps": 88.60818953184983, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 248.12933741712868, "prefill_tps": 95.18599687835801, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_mtp3: {"decode_tps": 317.3621869305503, "prefill_tps": 1547.1682920495357, "accept": 0.59465737514518, "tok_per_round": 2.78397212543554, "vram_mib": 6786}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain: {"decode_tps": 171.25314704416, "prefill_tps": 110.70164838755714, "vram_mib": 6696}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain_ub64: {"decode_tps": 171.18791789913053, "prefill_tps": 108.38636212275344, "vram_mib": 6560}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_plain: {"decode_tps": 167.97810199139798, "prefill_tps": 1547.8065551223885, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6414}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 248.51604854512496, "prefill_tps": 88.71919413042363, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0: {"decode_tps": 247.97712658984332, "prefill_tps": 88.5119960414876, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 247.38881109885165, "prefill_tps": 96.50175330896373, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_mtp3: {"decode_tps": 317.2690723098242, "prefill_tps": 1544.0220950942294, "accept": 0.59465737514518, "tok_per_round": 2.78397212543554, "vram_mib": 6786}
+SUMMARY {"fork_plain": {"decode_tps": 171.8120067384669, "prefill_tps": 110.70164838755714, "vram_mib": 6696}, "fork_plain_ub64": {"decode_tps": 171.43399609001912, "prefill_tps": 109.76164531383897, "vram_mib": 6560}, "ours_plain": {"decode_tps": 167.9922071015206, "prefill_tps": 1553.187323240577, "vram_mib": 6414}, "fork_mtp_p0.1": {"decode_tps": 248.51604854512496, "prefill_tps": 89.99006856592695, "vram_mib": 7524}, "fork_mtp_p0": {"decode_tps": 248.10979106364354, "prefill_tps": 88.60818953184983, "vram_mib": 7524}, "fork_mtp_p0_ub64": {"decode_tps": 248.12933741712868, "prefill_tps": 96.50175330896373, "vram_mib": 7284}, "ours_mtp3": {"decode_tps": 317.3621869305503, "prefill_tps": 1547.1682920495357, "vram_mib": 6786}}
+# o_prefill2.log
+GPU NVIDIA GeForce RTX 5090 tokens 2048
+[NVIDIA GeForce RTX 5090] ours mtp=0: {"64": {"tps": 3483.0987699174757, "first": 11}, "512": {"tps": 4218.77619786653, "first": 406}, "2048": {"tps": 3917.77561328022, "first": 466}}
+[NVIDIA GeForce RTX 5090] ours mtp=1: {"64": {"tps": 3421.1288743882546, "first": 11}, "512": {"tps": 4108.931321488296, "first": 406}, "2048": {"tps": 3801.007381709891, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=0: {"64": {"tps": 485.44425734613696, "first": 11}, "512": {"tps": 2993.626849090803, "first": 406}, "2048": {"tps": 3359.5910747738676, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=1: {"64": {"tps": 405.2838886989121, "first": 11}, "512": {"tps": 1892.679176093096, "first": 406}, "2048": {"tps": 2553.775173015774, "first": 466}}
