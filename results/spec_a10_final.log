@@ -1,16 +1,13 @@
-==========
-==========
-NVIDIA A10 device GiB 6.0967488288879395
-D=0: 600 tokens in 9.82s (incl. prefill) = 61.08 tok/s; decode-only 62.45 tok/s; rounds 0 accepted 0 drafted 0
+D=0: 600 tokens in 9.68s (incl. prefill) = 62.01 tok/s; decode-only 62.73 tok/s; rounds 0 accepted 0 drafted 0
   D=1 prompt 0: match first-divergence at 200 of 200
   D=1 prompt 1: match first-divergence at 200 of 200
   D=1 prompt 2: match first-divergence at 200 of 200
-D=1: 600 tokens in 6.48s (incl. prefill) = 92.63 tok/s; decode-only 95.99 tok/s; rounds 325 accepted 273 drafted 325; accept rate 0.84, tokens/round 1.84
+D=1: 600 tokens in 6.35s (incl. prefill) = 94.47 tok/s; decode-only 96.34 tok/s; rounds 325 accepted 273 drafted 325; accept rate 0.84, tokens/round 1.84
   D=2 prompt 0: match first-divergence at 200 of 200
   D=2 prompt 1: match first-divergence at 200 of 200
   D=2 prompt 2: match first-divergence at 200 of 200
-D=2: 600 tokens in 6.03s (incl. prefill) = 99.55 tok/s; decode-only 103.47 tok/s; rounds 246 accepted 354 drafted 492; accept rate 0.72, tokens/round 2.44
+D=2: 600 tokens in 5.95s (incl. prefill) = 100.78 tok/s; decode-only 102.95 tok/s; rounds 246 accepted 354 drafted 492; accept rate 0.72, tokens/round 2.44
   D=3 prompt 0: match first-divergence at 200 of 200
   D=3 prompt 1: match first-divergence at 200 of 200
   D=3 prompt 2: match first-divergence at 200 of 200
-D=3: 600 tokens in 5.43s (incl. prefill) = 110.41 tok/s; decode-only 115.34 tok/s; rounds 205 accepted 393 drafted 615; accept rate 0.64, tokens/round 2.92
+D=3: 600 tokens in 5.35s (incl. prefill) = 112.13 tok/s; decode-only 114.85 tok/s; rounds 206 accepted 392 drafted 618; accept rate 0.63, tokens/round 2.90

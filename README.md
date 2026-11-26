@@ -1,8 +1,8 @@
 # tritrun
 
 A standalone CUDA inference engine for **Ternary-Bonsai-2.5-27B** (PTQ1_0 GGUF), aimed at bandwidth-bound
-cards. On the cards tested (T4, L4, A10) it decodes faster than the PrismML llama.cpp fork and uses less VRAM.
-The fork is still faster at prefilling long prompts.
+cards. On the cards tested (T4, L4, A10) it decodes and prefills faster than the PrismML llama.cpp fork and uses
+less VRAM.
 
 ## Results
 
@@ -24,23 +24,29 @@ cut-off 0.1 and 0.
 The A10 row is the middle one of three machines; across them the margins were +1 to +2% plain and +10 to +12%
 with MTP. A10G machines, which an earlier revision of this table used, were not measured again.
 
+Measured again after the prefill changes (one machine per card, `results/paired_after_prefill.log`): plain
+35.1 / 37.8 / 62.1 and MTP 58.7 / 73.1 / 109.1 tok/s (T4 / L4 / A10), fork best 33.2 / 36.7 / 61.8 and
+46.9 / 65.4 / 100.6, and the same VRAM.
+
 VRAM is peak `nvidia-smi` memory. At the fork's default `-ub 512` its figures are 136 MiB higher in plain mode
 and 240 MiB higher with MTP.
 
 ### Prefill
 
-Real text, MTP off, best of 3, tok/s. Ours is the wall time of the whole prefill plus the first token; the
-fork's is its own `prompt_per_second` at its default batch size. The first generated token agreed in every
-case. Wide steps handle up to 128 tokens.
+Real text, best of 3, tok/s, both engines in the same container. Ours is the wall time of the whole prefill plus
+the first token; the fork's is its own `prompt_per_second` at its default batch size. The first generated token
+agreed in every case. Wide steps handle up to 128 tokens.
 
 | GPU | 64 tokens, fork / ours | 512 tokens, fork / ours | 2048 tokens, fork / ours |
 |---|---|---|---|
-| T4 | 203 / **224** | 321 / 260 (81%) | 329 / 250 (76%) |
-| L4 | 376 / **498** | 761 / 582 (77%) | 806 / 556 (69%) |
-| A10 | 515 / 526 | 919 / 621 (68%) | 954 / 598 (63%) |
+| T4 | 183 / **326** | 280 / **368 (+31%)** | 283 / **357 (+26%)** |
+| L4 | 370 / **743** | 747 / **841 (+13%)** | 789 / **831 (+5%)** |
+| A10 | 496 / **939** | 906 / **986 (+9%)** | 942 / **963 (+2%)** |
 
-With MTP on, prefill of 512 or more tokens costs 3 to 4% more. Before the batched path existed, the T4 figures were 125 tok/s
-at 512 tokens and 109 at 2048.
+With MTP on (both engines), 2048 tokens: T4 277 / 330, L4 733 / 801, A10 887 / 923. The fork's T4 figures in
+this container are lower than in an earlier one (329 at 2048 tokens), and T4 containers vary by about 10%, so
+the T4 margin is the least certain. The previous version of this engine reached 250, 556 and 598 tok/s at 2048
+tokens (T4, L4, A10), and the first batched version 109 on T4.
 
 ## Validation
 
@@ -53,7 +59,8 @@ at 512 tokens and 109 at 2048.
 * Steps of 1, 2, 4 and 8 tokens give bit-identical logits, and repeated runs are bit-identical, on all three
   cards. Wider steps add the group sums in a different order, so int8 activations can round differently: single
   kernels agree to 1e-6 or better, full logits to about 0.1. Attention agrees with a double-precision CPU
-  reference to 2e-6 (T4).
+  reference to 2e-6 for steps of up to 8 tokens and to 3e-4 for wider steps, whose attention uses FP16 queries
+  and probabilities (T4).
 * Speculative output equals plain greedy output for 1, 2 and 3 drafts on 3 prompts of 200 tokens, on all three
   cards.
 * The tokenizer built from the GGUF agrees with the fork's on 7 test strings.
@@ -96,6 +103,11 @@ disabled and the fork's tokenizer, so both engines get identical ids.
   looked bad, one stayed outside the fork's range on T4 for every step split: log-probability -0.26 to -0.34
   against -0.03 to -0.24.
 
+The tables were measured before the prefill changes listed under "How it works" (wide matmul, recurrent and
+attention kernels). Re-run on the current version: WikiText-2 perplexity 9.7162 on L4 (fork 9.7147, control
+9.7167), median KL 9e-5 and 99th percentile 0.0018 as before, top-1 agreement 99.1% (was 99.4%, control 99.4%);
+MMLU 778 correct on A10G (fork 778, control 775), the fork's choice on 1000 of 1000 questions.
+
 What this does not show: accuracy differences of about a point or less on these samples; results with thinking
 enabled, with long contexts, or with other samplers; MMLU and GSM8K on T4 and L4. `bench/quality.py`,
 `bench/offset.py` and `bench/outlier.py` reproduce the numbers, and `results/quality_*.log` holds the output.
@@ -108,9 +120,14 @@ enabled, with long contexts, or with other samplers; MMLU and GSM8K on T4 and L4
   shared memory sized per launch, so many fit on an SM at once.
 * **Few launches.** The RMS norm factor is a scalar, so it is applied to the matmul output; that lets one kernel
   do the residual add, sum of squares, Hadamard transform and quantisation. A 1-token step is about 640 launches.
-* **Prefill.** Steps of more than 8 tokens decode 64 rows of trits into shared memory and evaluate them
+* **Prefill.** Steps of more than 8 tokens decode 128 rows of trits into shared memory and evaluate them
   against up to 128 tokens with the INT8 tensor-core instruction (`mma.sync`; m8n8k16 on Turing, m16n8k32 on
-  Ampere and later). Attention shares KV reads across 8 tokens and evaluates the softmax online.
+  Ampere and later). Shared memory delivers about 64 bytes per clock and SM on these cards, which was the
+  limit, so a warp owns 64 rows x 32 tokens and each fragment is one wide load; prep writes the activations
+  in the order the kernel stores them, so loading them is a plain copy. Small matrices are split by columns
+  to fill all SMs. The recurrent layers stage a chunk of tokens in shared memory once per block, and attention
+  runs on FP16 tensor cores with an online softmax. `bench/tile_lab.py` times the matmul alone with parts of it
+  switched off, which is how the limits were found.
 * **Rollback.** Rejected drafts are undone by replaying recorded layer inputs from a checkpoint of the
   recurrent state, rather than keeping one state snapshot per token.
 * **Memory.** Token embeddings stay in host memory, and weights sit in one exactly sized allocation.

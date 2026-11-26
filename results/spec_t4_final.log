@@ -1,16 +1,13 @@
-==========
-==========
-Tesla T4 device GiB 6.0967488288879395
-D=0: 600 tokens in 17.64s (incl. prefill) = 34.02 tok/s; decode-only 35.20 tok/s; rounds 0 accepted 0 drafted 0
+D=0: 600 tokens in 17.64s (incl. prefill) = 34.02 tok/s; decode-only 34.93 tok/s; rounds 0 accepted 0 drafted 0
   D=1 prompt 0: match first-divergence at 200 of 200
   D=1 prompt 1: match first-divergence at 200 of 200
   D=1 prompt 2: match first-divergence at 200 of 200
-D=1: 600 tokens in 11.67s (incl. prefill) = 51.42 tok/s; decode-only 53.72 tok/s; rounds 325 accepted 274 drafted 325; accept rate 0.84, tokens/round 1.84
+D=1: 600 tokens in 12.18s (incl. prefill) = 49.26 tok/s; decode-only 50.80 tok/s; rounds 327 accepted 272 drafted 327; accept rate 0.83, tokens/round 1.83
   D=2 prompt 0: match first-divergence at 200 of 200
   D=2 prompt 1: match first-divergence at 200 of 200
   D=2 prompt 2: match first-divergence at 200 of 200
-D=2: 600 tokens in 11.33s (incl. prefill) = 52.96 tok/s; decode-only 55.41 tok/s; rounds 247 accepted 353 drafted 494; accept rate 0.71, tokens/round 2.43
+D=2: 600 tokens in 11.47s (incl. prefill) = 52.30 tok/s; decode-only 54.03 tok/s; rounds 249 accepted 350 drafted 498; accept rate 0.70, tokens/round 2.41
   D=3 prompt 0: match first-divergence at 200 of 200
   D=3 prompt 1: match first-divergence at 200 of 200
   D=3 prompt 2: match first-divergence at 200 of 200
-D=3: 600 tokens in 10.20s (incl. prefill) = 58.83 tok/s; decode-only 61.89 tok/s; rounds 204 accepted 394 drafted 612; accept rate 0.64, tokens/round 2.93
+D=3: 600 tokens in 10.59s (incl. prefill) = 56.67 tok/s; decode-only 58.77 tok/s; rounds 211 accepted 389 drafted 633; accept rate 0.61, tokens/round 2.84
