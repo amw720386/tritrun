@@ -1,8 +1,8 @@
 # tritrun
 
 A standalone CUDA inference engine for **Ternary-Bonsai-2.5-27B** (PTQ1_0 GGUF), aimed at bandwidth-bound
-cards. On the cards tested (T4, L4, A10) it decodes and prefills faster than the PrismML llama.cpp fork and uses
-less VRAM. On an RTX 5090 it prefills faster and decodes faster with MTP, but plain decode is 2% behind the fork.
+cards. On the cards tested (T4, L4, A10, RTX 5090) it decodes faster than the PrismML llama.cpp fork, with and
+without MTP, prefills faster or about as fast, and uses less VRAM.
 
 ## Results
 
@@ -11,25 +11,21 @@ container on the same GPU with the same prompt token ids.
 
 ### Decode and VRAM
 
-4 short raw prompts, greedy, 200 new tokens, decode time only, mean of 2 repetitions. The fork column is its
+4 short raw prompts, greedy, 200 new tokens, decode time only, the better of 2 repetitions. The fork column is its
 best setting among those tried: plain GGUF for plain decode, `-ub 512` and `-ub 64`, and MTP with 3 drafts at
-cut-off 0.1 and 0.
+cut-off 0.1 and 0. Logs: `results/paired_graphs.log`, `results/rtx5090_graphs.log`.
 
 | GPU | Plain tok/s, fork / ours | MTP tok/s, fork / ours | Plain VRAM MiB, fork `-ub 64` / ours | MTP VRAM MiB, fork `-ub 64` / ours |
 |---|---|---|---|---|
-| T4 | 33.2 / **35.2 (+6%)** | 47.1 / **60.7 (+29%)** | 6038 / **6012** (-0.4%) | 6738 / **6384** (-5%) |
-| L4 | 35.9 / **37.6 (+5%)** | 63.5 / **72.8 (+15%)** | 6140 / **6098** (-0.7%) | 6848 / **6470** (-6%) |
-| A10 | 61.4 / **62.0 (+1%)** | 99.4 / **109.7 (+10%)** | 6191 / **6141** (-0.8%) | 6899 / **6513** (-6%) |
+| T4 | 33.1 / **35.6 (+8%)** | 46.8 / **60.1 (+28%)** | 6038 / **6024** | 6738 / **6396** (-5%) |
+| L4 | 36.0 / **38.8 (+8%)** | 63.7 / **73.7 (+16%)** | 6145 / **6115** | 6853 / **6487** (-5%) |
+| A10 | 61.6 / **66.4 (+8%)** | 99.5 / **112.7 (+13%)** | 6191 / **6153** | 6899 / **6525** (-5%) |
+| RTX 5090 | 161.8 / **179.3 (+11%)** | 241.4 / **323.6 (+34%)** | 6562 / **6418** (-2%) | 7284 / **6790** (-7%) |
 
-The A10 row is the middle one of three machines; across them the margins were +1 to +2% plain and +10 to +12%
-with MTP. A10G machines, which an earlier revision of this table used, were not measured again.
-
-Measured again after the prefill changes (one machine per card, `results/paired_after_prefill.log`): plain
-35.1 / 37.8 / 62.1 and MTP 58.7 / 73.1 / 109.1 tok/s (T4 / L4 / A10), fork best 33.2 / 36.7 / 61.8 and
-46.9 / 65.4 / 100.6, and the same VRAM.
-
-VRAM is peak `nvidia-smi` memory. At the fork's default `-ub 512` its figures are 136 MiB higher in plain mode
-and 240 MiB higher with MTP.
+One machine per card. Machines of one type differ: on an earlier A10 the margins were +1 to +2% plain and +10
+to +12% with MTP (before the two decode changes below), and on another RTX 5090 the fork reached 171.8 plain
+(ours 168.0 before those changes, `results/rtx5090.log`). VRAM is peak `nvidia-smi` memory. At the fork's
+default `-ub 512` its figures are 136 MiB higher in plain mode and 240 MiB higher with MTP.
 
 ### Prefill
 
@@ -39,32 +35,14 @@ agreed in every case. Wide steps handle up to 128 tokens.
 
 | GPU | 64 tokens, fork / ours | 512 tokens, fork / ours | 2048 tokens, fork / ours |
 |---|---|---|---|
-| T4 | 183 / **326** | 280 / **368 (+31%)** | 283 / **357 (+26%)** |
-| L4 | 370 / **743** | 747 / **841 (+13%)** | 789 / **831 (+5%)** |
-| A10 | 496 / **939** | 906 / **986 (+9%)** | 942 / **963 (+2%)** |
+| T4 | 208 / **352** | 331 / **412 (+24%)** | 341 / **403 (+18%)** |
+| L4 | 367 / **745** | 741 / **827 (+12%)** | 788 / **811 (+3%)** |
+| A10 | 500 / **998** | 913 / **994 (+9%)** | 951 / 966 (+2%) |
+| RTX 5090 | 553 / **3461** | 2899 / **4043 (+39%)** | 3174 / **3531 (+11%)** |
 
-With MTP on (both engines), 2048 tokens: T4 277 / 330, L4 733 / 801, A10 887 / 923. The fork's T4 figures in
-this container are lower than in an earlier one (329 at 2048 tokens), and T4 containers vary by about 10%, so
-the T4 margin is the least certain. The previous version of this engine reached 250, 556 and 598 tok/s at 2048
-tokens (T4, L4, A10), and the first batched version 109 on T4.
-
-### RTX 5090
-
-Same benchmarks on one rented RTX 5090 (sm_120, CUDA 12.8, fork's CUDA 12.8 build), both engines on the same
-machine. Logs in `results/rtx5090.log`; the scripts ran outside Modal through `bench/vast/`.
-
-| | Fork | Ours |
-|---|---|---|
-| Plain decode, tok/s | 171.8 | 168.0 (-2%) |
-| MTP decode, tok/s | 248.5 | **317.4 (+28%)** |
-| Plain VRAM, MiB (fork `-ub 64`) | 6560 | **6414** |
-| MTP VRAM, MiB (fork `-ub 64`) | 7284 | **6786** |
-| Prefill, 64 / 512 / 2048 tokens, tok/s | 485 / 2994 / 3360 | **3483 / 4219 (+41%) / 3918 (+17%)** |
-
-Plain decode is the one loss. A token takes 6.1 ms; reading the weights at the measured 1.65 TB/s takes about
-3.5 ms, and each of the several hundred kernel launches per token costs about 2.9 us on this card, so launch
-overhead, not bandwidth, is what is left. llama.cpp normally replays decode steps as CUDA graphs, which cuts
-that cost; this engine launches each kernel separately.
+The 2048-token margin on A10 is within machine variation: in another A10 container the fork reached 1127 and
+ours 1060. Timing the previous and the current version of this engine in one container showed no change
+(A10, 2048 tokens: 949 and 966). With MTP on, both engines prefill a few percent slower.
 
 ## Validation
 
@@ -138,7 +116,12 @@ enabled, with long contexts, or with other samplers; MMLU and GSM8K on T4 and L4
   to 1.4x (T4) a 1-token step, which is where the MTP gain comes from. Matmul blocks are small (256 or 512 rows) with
   shared memory sized per launch, so many fit on an SM at once.
 * **Few launches.** The RMS norm factor is a scalar, so it is applied to the matmul output; that lets one kernel
-  do the residual add, sum of squares, Hadamard transform and quantisation. A 1-token step is about 640 launches.
+  do the residual add, sum of squares, Hadamard transform and quantisation. A 1-token step is about 640 launches,
+  replayed as one CUDA graph per step width (the position is read from device memory, so the graph is reused).
+* **Column partials.** Matmuls split their columns into partitions so every SM has work; the next kernel adds
+  the partial rows. Cards with many SMs use many partitions (34 for a 5120-row matrix on an RTX 5090), so the
+  adds fetch 8 partitions of 4 elements per thread at once. On the 5090 this was worth 7% of plain decode,
+  graphs about 2%.
 * **Prefill.** Steps of more than 8 tokens decode 128 rows of trits into shared memory and evaluate them
   against up to 128 tokens with the INT8 tensor-core instruction (`mma.sync`; m8n8k16 on Turing, m16n8k32 on
   Ampere and later). Shared memory delivers about 64 bytes per clock and SM on these cards, which was the

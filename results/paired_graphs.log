@@ -1,0 +1,196 @@
+# m_cons_t4.log
+== CUDA ==
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.4e-07', '4.6e-07', '5.0e-07', '5.0e-07', '2.5e-07', '2.6e-07'], 'B': ['2.6e-07', '3.9e-07', '3.9e-07', '2.5e-07', '4.0e-07', '4.0e-07'], 'C': ['6.1e-07', '5.8e-07', '5.8e-07', '5.6e-07', '5.6e-07', '5.0e-07'], 'D': ['5.3e-07', '4.6e-07', '5.1e-07', '4.2e-07', '5.9e-07', '7.3e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.0e-07', '2.9e-07', '2.9e-07', '3.9e-07', '5.3e-07', '5.3e-07'], 'B': ['1.2e-07', '2.1e-07', '1.9e-07', '2.3e-07', '2.8e-07', '4.9e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['5.3e-07', '5.1e-07', '4.5e-07', '4.5e-07', '6.9e-07', '7.1e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.6e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.6e-04', 512: '2.6e-04', 513: '2.6e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.8e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.095379 same argmax 13/15
+K=33: positions 4 max|logit diff| 0.054949 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.077745 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.079363 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.080662 same argmax 41/42
+17+then 4s: positions 121 max|logit diff| 0.095912 same argmax 120/121
+# m_spec_t4.log
+== CUDA ==
+D=0: 600 tokens in 20.98s (incl. prefill) = 28.60 tok/s; decode-only 29.34 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 18.97s (incl. prefill) = 31.62 tok/s; decode-only 32.39 tok/s; rounds 327 accepted 271 drafted 327; accept rate 0.83, tokens/round 1.83
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 16.34s (incl. prefill) = 36.72 tok/s; decode-only 37.81 tok/s; rounds 247 accepted 353 drafted 494; accept rate 0.71, tokens/round 2.43
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 13.95s (incl. prefill) = 43.00 tok/s; decode-only 44.39 tok/s; rounds 206 accepted 394 drafted 618; accept rate 0.64, tokens/round 2.91
+# m_paired_t4.log
+== CUDA ==
+== CUDA ==
+GPU Tesla T4, 15360 MiB
+[Tesla T4, 15360 MiB] rep0 fork_plain: {"decode_tps": 33.056018133209314, "prefill_tps": 82.02480706875951, "vram_mib": 6174}
+[Tesla T4, 15360 MiB] rep0 fork_plain_ub64: {"decode_tps": 33.00579346566979, "prefill_tps": 84.95933211728891, "vram_mib": 6038}
+[Tesla T4, 15360 MiB] rep0 ours_plain: {"decode_tps": 35.60382136966965, "prefill_tps": 127.35961241843162, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6024}
+[Tesla T4, 15360 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 46.34764347724122, "prefill_tps": 66.30256175524448, "vram_mib": 6978}
+[Tesla T4, 15360 MiB] rep0 fork_mtp_p0: {"decode_tps": 46.387153912692646, "prefill_tps": 68.54439777552784, "vram_mib": 6978}
+[Tesla T4, 15360 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 46.828825132093876, "prefill_tps": 71.69715811469298, "vram_mib": 6738}
+[Tesla T4, 15360 MiB] rep0 ours_mtp3: {"decode_tps": 60.07984625455034, "prefill_tps": 128.75020558713115, "accept": 0.6035087719298246, "tok_per_round": 2.810526315789474, "vram_mib": 6396}
+[Tesla T4, 15360 MiB] rep1 fork_plain: {"decode_tps": 32.91221468966764, "prefill_tps": 90.85416046377219, "vram_mib": 6174}
+[Tesla T4, 15360 MiB] rep1 fork_plain_ub64: {"decode_tps": 32.884656450911116, "prefill_tps": 88.86642840470842, "vram_mib": 6038}
+[Tesla T4, 15360 MiB] rep1 ours_plain: {"decode_tps": 35.508566350808714, "prefill_tps": 138.2585583485152, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6024}
+[Tesla T4, 15360 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 46.235229939068326, "prefill_tps": 69.46089142593168, "vram_mib": 6978}
+[Tesla T4, 15360 MiB] rep1 fork_mtp_p0: {"decode_tps": 46.25951355808518, "prefill_tps": 64.92160520624341, "vram_mib": 6978}
+[Tesla T4, 15360 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 46.806697874642424, "prefill_tps": 68.73751544523691, "vram_mib": 6738}
+[Tesla T4, 15360 MiB] rep1 ours_mtp3: {"decode_tps": 60.11994654702925, "prefill_tps": 132.15404653436673, "accept": 0.6035087719298246, "tok_per_round": 2.810526315789474, "vram_mib": 6396}
+SUMMARY {"fork_plain": {"decode_tps": 33.056018133209314, "prefill_tps": 90.85416046377219, "vram_mib": 6174}, "fork_plain_ub64": {"decode_tps": 33.00579346566979, "prefill_tps": 88.86642840470842, "vram_mib": 6038}, "ours_plain": {"decode_tps": 35.60382136966965, "prefill_tps": 138.2585583485152, "vram_mib": 6024}, "fork_mtp_p0.1": {"decode_tps": 46.34764347724122, "prefill_tps": 69.46089142593168, "vram_mib": 6978}, "fork_mtp_p0": {"decode_tps": 46.387153912692646, "prefill_tps": 68.54439777552784, "vram_mib": 6978}, "fork_mtp_p0_ub64": {"decode_tps": 46.828825132093876, "prefill_tps": 71.69715811469298, "vram_mib": 6738}, "ours_mtp3": {"decode_tps": 60.11994654702925, "prefill_tps": 132.15404653436673, "vram_mib": 6396}}
+# m_prefill_t4.log
+== CUDA ==
+GPU Tesla T4 tokens 2048
+[Tesla T4] ours mtp=0: {"64": {"tps": 352.33437418375934, "first": 11}, "512": {"tps": 412.11875328282196, "first": 406}, "2048": {"tps": 403.4893210500666, "first": 466}}
+[Tesla T4] ours mtp=1: {"64": {"tps": 343.32667746135525, "first": 11}, "512": {"tps": 395.18073615876983, "first": 406}, "2048": {"tps": 385.0271695885924, "first": 466}}
+[Tesla T4] fork mtp=0: {"64": {"tps": 207.70993307845592, "first": 11}, "512": {"tps": 331.1427464539592, "first": 406}, "2048": {"tps": 341.3861343887855, "first": 466}}
+[Tesla T4] fork mtp=1: {"64": {"tps": 172.85431082446104, "first": 11}, "512": {"tps": 314.4990190333332, "first": 406}, "2048": {"tps": 325.9531264125166, "first": 466}}
+# m_cons_l4.log
+== CUDA ==
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['2.3e-07', '2.3e-07', '3.0e-07', '3.0e-07', '3.0e-07', '2.9e-07'], 'B': ['2.1e-07', '2.1e-07', '2.1e-07', '1.3e-07', '1.3e-07', '2.1e-07'], 'C': ['6.1e-07', '5.8e-07', '5.8e-07', '5.6e-07', '5.6e-07', '5.0e-07'], 'D': ['4.3e-07', '4.6e-07', '4.6e-07', '3.8e-07', '3.8e-07', '3.6e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['5.0e-07', '5.3e-07', '5.3e-07', '5.3e-07', '5.3e-07', '5.8e-07'], 'B': ['1.3e-07', '1.1e-07', '1.9e-07', '1.9e-07', '1.4e-07', '1.9e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['3.7e-07', '3.4e-07', '3.0e-07', '2.9e-07', '3.1e-07', '3.0e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.6e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.6e-04', 512: '2.6e-04', 513: '2.6e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.8e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.082068 same argmax 13/15
+K=33: positions 4 max|logit diff| 0.067456 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.074661 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.068699 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.093166 same argmax 41/42
+17+then 4s: positions 121 max|logit diff| 0.107572 same argmax 118/121
+# m_spec_l4.log
+== CUDA ==
+D=0: 600 tokens in 15.59s (incl. prefill) = 38.48 tok/s; decode-only 38.80 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 9.91s (incl. prefill) = 60.56 tok/s; decode-only 61.52 tok/s; rounds 325 accepted 273 drafted 325; accept rate 0.84, tokens/round 1.84
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 8.81s (incl. prefill) = 68.07 tok/s; decode-only 69.35 tok/s; rounds 247 accepted 353 drafted 494; accept rate 0.71, tokens/round 2.43
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 8.03s (incl. prefill) = 74.73 tok/s; decode-only 76.33 tok/s; rounds 207 accepted 391 drafted 621; accept rate 0.63, tokens/round 2.89
+# m_paired_l4.log
+== CUDA ==
+== CUDA ==
+GPU NVIDIA L4, 23034 MiB
+[NVIDIA L4, 23034 MiB] rep0 fork_plain: {"decode_tps": 35.8605696227356, "prefill_tps": 95.69499353770556, "vram_mib": 6281}
+[NVIDIA L4, 23034 MiB] rep0 fork_plain_ub64: {"decode_tps": 35.86930677318775, "prefill_tps": 101.4503736551714, "vram_mib": 6145}
+[NVIDIA L4, 23034 MiB] rep0 ours_plain: {"decode_tps": 38.759416320272656, "prefill_tps": 307.24259269099684, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6115}
+[NVIDIA L4, 23034 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 63.30331911962808, "prefill_tps": 79.70553127577826, "vram_mib": 7093}
+[NVIDIA L4, 23034 MiB] rep0 fork_mtp_p0: {"decode_tps": 63.44898364642102, "prefill_tps": 81.79040174854083, "vram_mib": 7093}
+[NVIDIA L4, 23034 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 63.54737492546092, "prefill_tps": 82.56225492439088, "vram_mib": 6853}
+[NVIDIA L4, 23034 MiB] rep0 ours_mtp3: {"decode_tps": 73.67536596133758, "prefill_tps": 332.520815498168, "accept": 0.5979020979020979, "tok_per_round": 2.7937062937062938, "vram_mib": 6487}
+[NVIDIA L4, 23034 MiB] rep1 fork_plain: {"decode_tps": 35.90548563111835, "prefill_tps": 102.51115271938623, "vram_mib": 6281}
+[NVIDIA L4, 23034 MiB] rep1 fork_plain_ub64: {"decode_tps": 36.03905714798885, "prefill_tps": 101.6940015241848, "vram_mib": 6145}
+[NVIDIA L4, 23034 MiB] rep1 ours_plain: {"decode_tps": 38.782849266877875, "prefill_tps": 338.451236495685, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6115}
+[NVIDIA L4, 23034 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 63.41682898732519, "prefill_tps": 81.05943707639119, "vram_mib": 7093}
+[NVIDIA L4, 23034 MiB] rep1 fork_mtp_p0: {"decode_tps": 63.657583313055746, "prefill_tps": 80.59692216862041, "vram_mib": 7093}
+[NVIDIA L4, 23034 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 63.56982553340844, "prefill_tps": 79.71372209299422, "vram_mib": 6853}
+[NVIDIA L4, 23034 MiB] rep1 ours_mtp3: {"decode_tps": 73.49331547827391, "prefill_tps": 327.27014120800595, "accept": 0.5979020979020979, "tok_per_round": 2.7937062937062938, "vram_mib": 6487}
+SUMMARY {"fork_plain": {"decode_tps": 35.90548563111835, "prefill_tps": 102.51115271938623, "vram_mib": 6281}, "fork_plain_ub64": {"decode_tps": 36.03905714798885, "prefill_tps": 101.6940015241848, "vram_mib": 6145}, "ours_plain": {"decode_tps": 38.782849266877875, "prefill_tps": 338.451236495685, "vram_mib": 6115}, "fork_mtp_p0.1": {"decode_tps": 63.41682898732519, "prefill_tps": 81.05943707639119, "vram_mib": 7093}, "fork_mtp_p0": {"decode_tps": 63.657583313055746, "prefill_tps": 81.79040174854083, "vram_mib": 7093}, "fork_mtp_p0_ub64": {"decode_tps": 63.56982553340844, "prefill_tps": 82.56225492439088, "vram_mib": 6853}, "ours_mtp3": {"decode_tps": 73.67536596133758, "prefill_tps": 332.520815498168, "vram_mib": 6487}}
+# m_prefill_l4.log
+== CUDA ==
+GPU NVIDIA L4 tokens 2048
+[NVIDIA L4] ours mtp=0: {"64": {"tps": 745.3000269316519, "first": 11}, "512": {"tps": 826.5608640176745, "first": 406}, "2048": {"tps": 810.8228009261007, "first": 466}}
+[NVIDIA L4] ours mtp=1: {"64": {"tps": 777.4765933413465, "first": 11}, "512": {"tps": 800.7351710920284, "first": 406}, "2048": {"tps": 784.1951245697506, "first": 466}}
+[NVIDIA L4] fork mtp=0: {"64": {"tps": 366.8399603354293, "first": 11}, "512": {"tps": 741.2361850658281, "first": 406}, "2048": {"tps": 787.5290468629772, "first": 466}}
+[NVIDIA L4] fork mtp=1: {"64": {"tps": 274.49315268252724, "first": 11}, "512": {"tps": 676.0530648839289, "first": 406}, "2048": {"tps": 729.9631703640655, "first": 466}}
+# m_cons_a10.log
+== CUDA ==
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.4e-07', '4.6e-07', '5.0e-07', '5.0e-07', '5.0e-07', '4.8e-07'], 'B': ['2.6e-07', '2.1e-07', '2.1e-07', '1.7e-07', '1.5e-07', '1.7e-07'], 'C': ['5.3e-07', '5.1e-07', '5.1e-07', '4.9e-07', '4.9e-07', '5.0e-07'], 'D': ['4.4e-07', '3.8e-07', '3.8e-07', '3.1e-07', '2.9e-07', '3.2e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['5.0e-07', '5.3e-07', '5.3e-07', '5.3e-07', '5.3e-07', '5.3e-07'], 'B': ['2.4e-07', '2.1e-07', '1.9e-07', '2.3e-07', '1.9e-07', '1.9e-07'], 'C': ['6.3e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['5.0e-07', '4.0e-07', '3.6e-07', '3.3e-07', '4.1e-07', '3.3e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.6e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.6e-04', 512: '2.6e-04', 513: '2.6e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.8e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.076471 same argmax 14/15
+K=33: positions 4 max|logit diff| 0.056137 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.062601 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.065955 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.088448 same argmax 38/42
+17+then 4s: positions 121 max|logit diff| 0.081311 same argmax 115/121
+# m_spec_a10.log
+== CUDA ==
+D=0: 600 tokens in 9.10s (incl. prefill) = 65.93 tok/s; decode-only 66.81 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 5.98s (incl. prefill) = 100.36 tok/s; decode-only 102.62 tok/s; rounds 324 accepted 274 drafted 324; accept rate 0.85, tokens/round 1.85
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 5.74s (incl. prefill) = 104.59 tok/s; decode-only 107.03 tok/s; rounds 247 accepted 353 drafted 494; accept rate 0.71, tokens/round 2.43
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 5.20s (incl. prefill) = 115.40 tok/s; decode-only 118.43 tok/s; rounds 206 accepted 392 drafted 618; accept rate 0.63, tokens/round 2.90
+# m_paired_a10.log
+== CUDA ==
+== CUDA ==
+GPU NVIDIA A10, 23028 MiB
+[NVIDIA A10, 23028 MiB] rep0 fork_plain: {"decode_tps": 61.47713100676717, "prefill_tps": 146.65580589132276, "vram_mib": 6327}
+[NVIDIA A10, 23028 MiB] rep0 fork_plain_ub64: {"decode_tps": 61.626222019095344, "prefill_tps": 155.64319079792452, "vram_mib": 6191}
+[NVIDIA A10, 23028 MiB] rep0 ours_plain: {"decode_tps": 66.41681168857461, "prefill_tps": 385.3086968666415, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6153}
+[NVIDIA A10, 23028 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 99.54896851091915, "prefill_tps": 118.79765324539446, "vram_mib": 7139}
+[NVIDIA A10, 23028 MiB] rep0 fork_mtp_p0: {"decode_tps": 99.36154000450854, "prefill_tps": 120.17925532299985, "vram_mib": 7139}
+[NVIDIA A10, 23028 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 99.0296578970953, "prefill_tps": 123.0772880883428, "vram_mib": 6899}
+[NVIDIA A10, 23028 MiB] rep0 ours_mtp3: {"decode_tps": 112.67312520995428, "prefill_tps": 422.19421200206233, "accept": 0.6011695906432749, "tok_per_round": 2.803508771929825, "vram_mib": 6525}
+[NVIDIA A10, 23028 MiB] rep1 fork_plain: {"decode_tps": 61.23013952588432, "prefill_tps": 155.8767409366126, "vram_mib": 6327}
+[NVIDIA A10, 23028 MiB] rep1 fork_plain_ub64: {"decode_tps": 61.230102034607405, "prefill_tps": 155.8032973984604, "vram_mib": 6191}
+[NVIDIA A10, 23028 MiB] rep1 ours_plain: {"decode_tps": 66.19861329119193, "prefill_tps": 414.265735216207, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6153}
+[NVIDIA A10, 23028 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 98.86394208352544, "prefill_tps": 122.2962220781517, "vram_mib": 7139}
+[NVIDIA A10, 23028 MiB] rep1 fork_mtp_p0: {"decode_tps": 98.78790939716284, "prefill_tps": 116.42994914957039, "vram_mib": 7139}
+[NVIDIA A10, 23028 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 98.84906328774208, "prefill_tps": 123.85785893037546, "vram_mib": 6899}
+[NVIDIA A10, 23028 MiB] rep1 ours_mtp3: {"decode_tps": 112.44919625659207, "prefill_tps": 418.8454492439964, "accept": 0.6011695906432749, "tok_per_round": 2.803508771929825, "vram_mib": 6525}
+SUMMARY {"fork_plain": {"decode_tps": 61.47713100676717, "prefill_tps": 155.8767409366126, "vram_mib": 6327}, "fork_plain_ub64": {"decode_tps": 61.626222019095344, "prefill_tps": 155.8032973984604, "vram_mib": 6191}, "ours_plain": {"decode_tps": 66.41681168857461, "prefill_tps": 414.265735216207, "vram_mib": 6153}, "fork_mtp_p0.1": {"decode_tps": 99.54896851091915, "prefill_tps": 122.2962220781517, "vram_mib": 7139}, "fork_mtp_p0": {"decode_tps": 99.36154000450854, "prefill_tps": 120.17925532299985, "vram_mib": 7139}, "fork_mtp_p0_ub64": {"decode_tps": 99.0296578970953, "prefill_tps": 123.85785893037546, "vram_mib": 6899}, "ours_mtp3": {"decode_tps": 112.67312520995428, "prefill_tps": 422.19421200206233, "vram_mib": 6525}}
+# m_prefill_a10.log
+== CUDA ==
+GPU NVIDIA A10G tokens 2048
+[NVIDIA A10G] ours mtp=0: {"64": {"tps": 948.9878776094604, "first": 11}, "512": {"tps": 1074.4880559548606, "first": 406}, "2048": {"tps": 1059.579353908243, "first": 466}}
+[NVIDIA A10G] ours mtp=1: {"64": {"tps": 939.1535999048375, "first": 11}, "512": {"tps": 1050.9545029889423, "first": 406}, "2048": {"tps": 1036.6933829855718, "first": 466}}
+[NVIDIA A10G] fork mtp=0: {"64": {"tps": 553.011319450445, "first": 11}, "512": {"tps": 1073.7534393664855, "first": 406}, "2048": {"tps": 1126.809538926923, "first": 466}}
+[NVIDIA A10G] fork mtp=1: {"64": {"tps": 442.9065743944637, "first": 11}, "512": {"tps": 958.2398332063791, "first": 406}, "2048": {"tps": 1040.1530568970832, "first": 466}}
+# m_pre_ab_a10.log
+== CUDA ==
+GPU NVIDIA A10 tokens 2048
+[NVIDIA A10] ours mtp=0: {"64": {"tps": 924.8039908772075, "first": 11}, "512": {"tps": 994.29055173707, "first": 406}, "2048": {"tps": 965.9151465756473, "first": 466}}
+[NVIDIA A10] ours mtp=1: {"64": {"tps": 991.5209414511083, "first": 11}, "512": {"tps": 965.893098320795, "first": 406}, "2048": {"tps": 930.3059703246381, "first": 466}}
+[NVIDIA A10] base mtp=0: {"64": {"tps": 1001.6136237280926, "first": 11}, "512": {"tps": 977.6251417510344, "first": 406}, "2048": {"tps": 949.4586377740187, "first": 466}}
+[NVIDIA A10] base mtp=1: {"64": {"tps": 977.8000801369614, "first": 11}, "512": {"tps": 945.5919001235994, "first": 406}, "2048": {"tps": 923.4094894323633, "first": 466}}
+[NVIDIA A10] ours mtp=0: {"64": {"tps": 997.9681019547777, "first": 11}, "512": {"tps": 975.3628277425731, "first": 406}, "2048": {"tps": 950.9875224837193, "first": 466}}
+[NVIDIA A10] ours mtp=1: {"64": {"tps": 962.3412059941206, "first": 11}, "512": {"tps": 945.9876155071788, "first": 406}, "2048": {"tps": 921.9650554337052, "first": 466}}
+[NVIDIA A10] base mtp=0: {"64": {"tps": 994.4742689690175, "first": 11}, "512": {"tps": 969.4292931937646, "first": 406}, "2048": {"tps": 941.4519394989223, "first": 466}}
+[NVIDIA A10] base mtp=1: {"64": {"tps": 968.6859006975494, "first": 11}, "512": {"tps": 937.1547929668561, "first": 406}, "2048": {"tps": 912.4572492996651, "first": 466}}
+[NVIDIA A10] fork mtp=0: {"64": {"tps": 500.41440567970346, "first": 11}, "512": {"tps": 912.9114565038701, "first": 406}, "2048": {"tps": 951.1146571505664, "first": 466}}
+[NVIDIA A10] fork mtp=1: {"64": {"tps": 381.26102082638323, "first": 11}, "512": {"tps": 836.859749170904, "first": 406}, "2048": {"tps": 892.0878602000752, "first": 466}}

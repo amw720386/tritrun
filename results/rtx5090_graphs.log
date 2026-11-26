@@ -1,0 +1,278 @@
+# o_spec_nograph.log
+D=0: 600 tokens in 3.65s (incl. prefill) = 164.26 tok/s; decode-only 165.44 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 2.31s (incl. prefill) = 259.94 tok/s; decode-only 263.64 tok/s; rounds 324 accepted 275 drafted 324; accept rate 0.85, tokens/round 1.85
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 2.09s (incl. prefill) = 286.46 tok/s; decode-only 291.07 tok/s; rounds 246 accepted 355 drafted 492; accept rate 0.72, tokens/round 2.44
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 1.92s (incl. prefill) = 313.01 tok/s; decode-only 318.70 tok/s; rounds 207 accepted 392 drafted 621; accept rate 0.63, tokens/round 2.89
+# o_spec_graph.log
+D=0: 600 tokens in 3.59s (incl. prefill) = 167.20 tok/s; decode-only 168.40 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 2.28s (incl. prefill) = 263.58 tok/s; decode-only 267.37 tok/s; rounds 324 accepted 275 drafted 324; accept rate 0.85, tokens/round 1.85
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 2.07s (incl. prefill) = 289.71 tok/s; decode-only 294.43 tok/s; rounds 246 accepted 355 drafted 492; accept rate 0.72, tokens/round 2.44
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 1.90s (incl. prefill) = 316.34 tok/s; decode-only 322.13 tok/s; rounds 207 accepted 392 drafted 621; accept rate 0.63, tokens/round 2.89
+# o_launch_graph.log
+=== variant []
+empty kernel, 1 blocks: enqueue 1.67 us, total 1.67 us per launch
+empty kernel, 40 blocks: enqueue 1.66 us, total 1.66 us per launch
+empty kernel, 160 blocks: enqueue 1.66 us, total 1.66 us per launch
+read bandwidth GB/s: one kernel 1694, 64 kernels 1638, 256 kernels 1513
+MTP draft row: 0.42 ms
+K=1: enqueue 0.02 ms, step 6.05 ms (6.05 per token)
+K=4: enqueue 0.02 ms, step 7.63 ms (1.91 per token)
+# o_launch_prof.log
+=== variant []
+empty kernel, 1 blocks: enqueue 2.26 us, total 2.26 us per launch
+empty kernel, 40 blocks: enqueue 2.26 us, total 2.26 us per launch
+empty kernel, 160 blocks: enqueue 2.25 us, total 2.25 us per launch
+read bandwidth GB/s: one kernel 1694, 64 kernels 1638, 256 kernels 1509
+MTP draft row: 0.43 ms
+K=1: enqueue 0.02 ms, step 6.06 ms (6.06 per token)
+K=4: enqueue 0.02 ms, step 7.65 ms (1.91 per token)
+kernel profile over 1 steps (synchronised, launch latency included):
+  m_argmax        0.036 ms/step     9.1 us/call  (  2.7%)
+  m_attn          0.057 ms/step    14.3 us/call  (  4.2%)
+  m_head          0.690 ms/step   172.6 us/call  ( 50.8%)
+  m_norm          0.068 ms/step     3.4 us/call  (  5.0%)
+  m_swiglu        0.008 ms/step     2.1 us/call  (  0.6%)
+--- MTP row
+kernel profile over 30 steps (synchronised, launch latency included):
+  m_argmax        0.008 ms/step     8.3 us/call  (  2.4%)
+  m_attn          0.015 ms/step    14.9 us/call  (  4.4%)
+  m_head          0.173 ms/step   172.7 us/call  ( 50.8%)
+  m_norm          0.017 ms/step     3.4 us/call  (  5.0%)
+  m_swiglu        0.002 ms/step     2.0 us/call  (  0.6%)
+kernel profile over 8 steps (synchronised, launch latency included):
+  attn            0.227 ms/step    14.2 us/call  (  5.4%)
+  attn_prep       0.042 ms/step     2.6 us/call  (  1.0%)
+  conv            0.096 ms/step     2.0 us/call  (  2.3%)
+  gdn             0.122 ms/step     2.5 us/call  (  2.9%)
+  prep_norm       0.814 ms/step     6.4 us/call  ( 19.5%)
+  prep_ssm        0.228 ms/step     4.7 us/call  (  5.5%)
+  prep_swiglu     0.324 ms/step     5.1 us/call  (  7.8%)
+  prep_wo         0.031 ms/step     2.0 us/call  (  0.8%)
+--- above: warm-up
+--- K=1
+kernel profile over 10 steps (synchronised, launch latency included):
+  attn            0.235 ms/step    14.7 us/call  (  5.6%)
+  attn_prep       0.041 ms/step     2.6 us/call  (  1.0%)
+  conv            0.095 ms/step     2.0 us/call  (  2.3%)
+  gdn             0.122 ms/step     2.5 us/call  (  2.9%)
+  prep_norm       0.815 ms/step     6.4 us/call  ( 19.5%)
+  prep_ssm        0.228 ms/step     4.7 us/call  (  5.4%)
+  prep_swiglu     0.324 ms/step     5.1 us/call  (  7.7%)
+  prep_wo         0.031 ms/step     2.0 us/call  (  0.7%)
+kernel profile over 8 steps (synchronised, launch latency included):
+  attn            0.236 ms/step    14.7 us/call  (  4.2%)
+  attn_prep       0.044 ms/step     2.7 us/call  (  0.8%)
+  conv            0.175 ms/step     3.6 us/call  (  3.1%)
+  gate            0.417 ms/step     8.7 us/call  (  7.4%)
+  gdn             0.222 ms/step     4.6 us/call  (  4.0%)
+  prep_norm       0.830 ms/step     6.5 us/call  ( 14.8%)
+  prep_ssm        0.234 ms/step     4.9 us/call  (  4.2%)
+  prep_swiglu     0.325 ms/step     5.1 us/call  (  5.8%)
+  prep_wo         0.031 ms/step     2.0 us/call  (  0.6%)
+--- above: warm-up
+--- K=4
+kernel profile over 10 steps (synchronised, launch latency included):
+  attn            0.268 ms/step    16.8 us/call  (  4.7%)
+  attn_prep       0.044 ms/step     2.7 us/call  (  0.8%)
+  conv            0.175 ms/step     3.6 us/call  (  3.1%)
+  gate            0.417 ms/step     8.7 us/call  (  7.4%)
+  gdn             0.222 ms/step     4.6 us/call  (  3.9%)
+  prep_norm       0.830 ms/step     6.5 us/call  ( 14.7%)
+  prep_ssm        0.234 ms/step     4.9 us/call  (  4.1%)
+  prep_swiglu     0.326 ms/step     5.1 us/call  (  5.8%)
+  prep_wo         0.031 ms/step     2.0 us/call  (  0.6%)
+# o_var.log
+== base rep1 0 #define PARTS_HALF 2                   // column partitions x chunks per SM, in halves
+D=0: decode-only 167.94 tok/s
+D=3: decode-only 321.70 tok/s
+== ps rep1 4 #define PARTS_HALF 2                   // column partitions x chunks per SM, in halves
+D=0: decode-only 180.32 tok/s
+D=3: decode-only 336.61 tok/s
+== ph1 rep1 0 #define PARTS_HALF 1                   // column partitions x chunks per SM, in halves
+D=0: decode-only 173.43 tok/s
+D=3: decode-only 322.05 tok/s
+== psph1 rep1 4 #define PARTS_HALF 1                   // column partitions x chunks per SM, in halves
+D=0: decode-only 182.46 tok/s
+D=3: decode-only 332.20 tok/s
+== base rep2 0 #define PARTS_HALF 2                   // column partitions x chunks per SM, in halves
+D=0: decode-only 167.60 tok/s
+D=3: decode-only 320.01 tok/s
+== ps rep2 4 #define PARTS_HALF 2                   // column partitions x chunks per SM, in halves
+D=0: decode-only 180.12 tok/s
+D=3: decode-only 336.29 tok/s
+== ph1 rep2 0 #define PARTS_HALF 1                   // column partitions x chunks per SM, in halves
+D=0: decode-only 173.58 tok/s
+D=3: decode-only 321.82 tok/s
+== psph1 rep2 4 #define PARTS_HALF 1                   // column partitions x chunks per SM, in halves
+D=0: decode-only 182.30 tok/s
+D=3: decode-only 331.88 tok/s
+# o_prof_ps.log
+=== variant []
+empty kernel, 1 blocks: enqueue 2.24 us, total 2.24 us per launch
+empty kernel, 40 blocks: enqueue 2.26 us, total 2.26 us per launch
+empty kernel, 160 blocks: enqueue 2.24 us, total 2.24 us per launch
+read bandwidth GB/s: one kernel 1696, 64 kernels 1636, 256 kernels 1513
+MTP draft row: 0.43 ms
+K=1: enqueue 0.02 ms, step 5.61 ms (5.61 per token)
+K=4: enqueue 0.02 ms, step 7.22 ms (1.80 per token)
+kernel profile over 1 steps (synchronised, launch latency included):
+  m_argmax        0.032 ms/step     8.1 us/call  (  2.4%)
+  m_attn          0.057 ms/step    14.3 us/call  (  4.2%)
+  m_head          0.689 ms/step   172.2 us/call  ( 50.8%)
+  m_norm          0.068 ms/step     3.4 us/call  (  5.0%)
+  m_swiglu        0.009 ms/step     2.2 us/call  (  0.6%)
+--- MTP row
+kernel profile over 30 steps (synchronised, launch latency included):
+  m_argmax        0.008 ms/step     8.3 us/call  (  2.4%)
+  m_attn          0.015 ms/step    14.9 us/call  (  4.4%)
+  m_head          0.172 ms/step   172.3 us/call  ( 50.8%)
+  m_norm          0.017 ms/step     3.4 us/call  (  5.0%)
+  m_swiglu        0.002 ms/step     2.0 us/call  (  0.6%)
+kernel profile over 8 steps (synchronised, launch latency included):
+  attn            0.227 ms/step    14.2 us/call  (  6.2%)
+  attn_prep       0.041 ms/step     2.6 us/call  (  1.1%)
+  conv            0.096 ms/step     2.0 us/call  (  2.6%)
+  gdn             0.121 ms/step     2.5 us/call  (  3.3%)
+  prep_norm       0.543 ms/step     4.2 us/call  ( 14.8%)
+  prep_ssm        0.161 ms/step     3.3 us/call  (  4.4%)
+  prep_swiglu     0.183 ms/step     2.9 us/call  (  5.0%)
+  prep_wo         0.032 ms/step     2.0 us/call  (  0.9%)
+--- above: warm-up
+--- K=1
+kernel profile over 10 steps (synchronised, launch latency included):
+  attn            0.235 ms/step    14.7 us/call  (  6.3%)
+  attn_prep       0.042 ms/step     2.6 us/call  (  1.1%)
+  conv            0.097 ms/step     2.0 us/call  (  2.6%)
+  gdn             0.122 ms/step     2.5 us/call  (  3.3%)
+  prep_norm       0.548 ms/step     4.3 us/call  ( 14.7%)
+  prep_ssm        0.163 ms/step     3.4 us/call  (  4.4%)
+  prep_swiglu     0.186 ms/step     2.9 us/call  (  5.0%)
+  prep_wo         0.032 ms/step     2.0 us/call  (  0.9%)
+kernel profile over 8 steps (synchronised, launch latency included):
+  attn            0.236 ms/step    14.8 us/call  (  4.5%)
+  attn_prep       0.045 ms/step     2.8 us/call  (  0.9%)
+  conv            0.175 ms/step     3.6 us/call  (  3.4%)
+  gate            0.421 ms/step     8.8 us/call  (  8.1%)
+  gdn             0.223 ms/step     4.6 us/call  (  4.3%)
+  prep_norm       0.559 ms/step     4.4 us/call  ( 10.7%)
+  prep_ssm        0.169 ms/step     3.5 us/call  (  3.3%)
+  prep_swiglu     0.190 ms/step     3.0 us/call  (  3.7%)
+  prep_wo         0.032 ms/step     2.0 us/call  (  0.6%)
+--- above: warm-up
+--- K=4
+kernel profile over 10 steps (synchronised, launch latency included):
+  attn            0.268 ms/step    16.8 us/call  (  5.1%)
+  attn_prep       0.045 ms/step     2.8 us/call  (  0.9%)
+  conv            0.175 ms/step     3.6 us/call  (  3.3%)
+  gate            0.421 ms/step     8.8 us/call  (  8.0%)
+  gdn             0.223 ms/step     4.6 us/call  (  4.3%)
+  prep_norm       0.559 ms/step     4.4 us/call  ( 10.7%)
+  prep_ssm        0.170 ms/step     3.5 us/call  (  3.2%)
+  prep_swiglu     0.189 ms/step     3.0 us/call  (  3.6%)
+  prep_wo         0.032 ms/step     2.0 us/call  (  0.6%)
+# o_var2.log
+== batch #define PS_BATCH 8 rep1
+D=0: decode-only 180.37 tok/s
+D=3: decode-only 336.86 tok/s
+== batch #define PS_BATCH 16 rep1
+D=0: decode-only 179.15 tok/s
+D=3: decode-only 335.06 tok/s
+== batch #define PS_BATCH 32 rep1
+D=0: decode-only 173.22 tok/s
+D=3: decode-only 326.36 tok/s
+== batch #define PS_BATCH 8 rep2
+D=0: decode-only 180.07 tok/s
+D=3: decode-only 336.52 tok/s
+== batch #define PS_BATCH 16 rep2
+D=0: decode-only 178.98 tok/s
+D=3: decode-only 334.71 tok/s
+== batch #define PS_BATCH 32 rep2
+D=0: decode-only 173.31 tok/s
+D=3: decode-only 326.52 tok/s
+# f_consistency.log
+layer 0: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.2e-07', '3.2e-07', '3.0e-07', '3.0e-07', '5.0e-07', '4.8e-07'], 'B': ['3.0e-07', '2.5e-07', '2.9e-07', '2.5e-07', '1.7e-07', '1.7e-07'], 'C': ['5.7e-07', '5.4e-07', '5.4e-07', '5.3e-07', '5.3e-07', '5.6e-07'], 'D': ['1.8e-07', '2.0e-07', '2.0e-07', '2.9e-07', '2.9e-07', '4.0e-07']}
+layer 3: wide matmul vs decode matmul, max error / max|y|: {'A': ['3.3e-07', '3.9e-07', '3.9e-07', '3.9e-07', '6.3e-07', '6.3e-07'], 'B': ['1.3e-07', '2.1e-07', '1.9e-07', '1.9e-07', '1.4e-07', '1.9e-07'], 'C': ['5.4e-07', '6.0e-07', '6.0e-07', '6.9e-07', '6.9e-07', '6.3e-07'], 'D': ['2.7e-07', '2.7e-07', '3.0e-07', '2.8e-07', '4.1e-07', '3.3e-07']}
+attention (K=1) vs CPU reference, max error / max|out|: {0: '3.0e-08', 5: '1.5e-07', 300: '6.6e-07', 511: '6.3e-07', 512: '6.5e-07', 513: '6.2e-07', 1500: '9.5e-07', 3000: '1.3e-06'}
+attention (K=4) vs CPU reference, max error / max|out|: {0: '1.2e-07', 5: '1.3e-07', 300: '5.4e-07', 511: '6.5e-07', 512: '6.6e-07', 513: '6.6e-07', 1500: '1.2e-06', 3000: '1.4e-06'}
+attention (K=9) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.0e-04', 300: '2.4e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.4e-04', 1500: '2.0e-04', 3000: '1.5e-04'}
+attention (K=16) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.7e-04', 300: '2.3e-04', 511: '2.7e-04', 512: '2.7e-04', 513: '2.7e-04', 1500: '2.2e-04', 3000: '1.6e-04'}
+attention (K=37) vs CPU reference, max error / max|out|: {0: '2.0e-04', 5: '2.4e-04', 300: '2.3e-04', 511: '2.4e-04', 512: '2.4e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '1.9e-04'}
+attention (K=128) vs CPU reference, max error / max|out|: {0: '1.8e-04', 5: '2.3e-04', 300: '2.3e-04', 511: '2.3e-04', 512: '2.3e-04', 513: '2.3e-04', 1500: '2.4e-04', 3000: '2.4e-04'}
+K=1 run-to-run max diff 0.0
+K=2: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=4: positions 140 max|logit diff| 0.000000 same argmax 140/140
+K=8: positions 17 max|logit diff| 0.000000 same argmax 17/17
+K=9: positions 15 max|logit diff| 0.079978 same argmax 14/15
+K=33: positions 4 max|logit diff| 0.055312 same argmax 4/4
+K=64: positions 2 max|logit diff| 0.066616 same argmax 2/2
+K=128: positions 1 max|logit diff| 0.072608 same argmax 1/1
+64+36+then 1s: positions 42 max|logit diff| 0.085187 same argmax 41/42
+17+then 4s: positions 121 max|logit diff| 0.097406 same argmax 117/121
+# f_spec.log
+D=0: 600 tokens in 3.36s (incl. prefill) = 178.83 tok/s; decode-only 180.24 tok/s; rounds 0 accepted 0 drafted 0
+  D=1 prompt 0: match first-divergence at 200 of 200
+  D=1 prompt 1: match first-divergence at 200 of 200
+  D=1 prompt 2: match first-divergence at 200 of 200
+D=1: 600 tokens in 2.16s (incl. prefill) = 277.64 tok/s; decode-only 281.86 tok/s; rounds 324 accepted 275 drafted 324; accept rate 0.85, tokens/round 1.85
+  D=2 prompt 0: match first-divergence at 200 of 200
+  D=2 prompt 1: match first-divergence at 200 of 200
+  D=2 prompt 2: match first-divergence at 200 of 200
+D=2: 600 tokens in 1.98s (incl. prefill) = 302.58 tok/s; decode-only 307.73 tok/s; rounds 246 accepted 355 drafted 492; accept rate 0.72, tokens/round 2.44
+  D=3 prompt 0: match first-divergence at 200 of 200
+  D=3 prompt 1: match first-divergence at 200 of 200
+  D=3 prompt 2: match first-divergence at 200 of 200
+D=3: 600 tokens in 1.82s (incl. prefill) = 329.58 tok/s; decode-only 335.85 tok/s; rounds 207 accepted 392 drafted 621; accept rate 0.63, tokens/round 2.89
+# f_validate_long.log
+fork ub=512 vs fork ub=64, prompt 300@0: same tokens for 32/32, mean |dlogprob| 0.0435 max 0.215
+fork ub=512 vs fork ub=64, prompt 1000@0: same tokens for 32/32, mean |dlogprob| 0.0453 max 0.238
+fork ub=512 vs fork ub=64, prompt 1000@2000: same tokens for 32/32, mean |dlogprob| 0.0296 max 0.147
+ours vs fork, prompt 300@0, wide 128-token steps: argmax agreement 31/32, mean |dlogprob| 0.0442 median 0.0332 max 0.308
+ours vs fork, prompt 300@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0383 median 0.0294 max 0.194
+ours vs fork, prompt 300@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0383 median 0.0294 max 0.194
+ours vs fork, prompt 1000@0, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0491 median 0.0343 max 0.352
+ours vs fork, prompt 1000@0, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0488 median 0.0344 max 0.317
+ours vs fork, prompt 1000@0, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0488 median 0.0344 max 0.317
+ours vs fork, prompt 1000@2000, wide 128-token steps: argmax agreement 32/32, mean |dlogprob| 0.0279 median 0.0214 max 0.131
+ours vs fork, prompt 1000@2000, 4-token steps: argmax agreement 32/32, mean |dlogprob| 0.0288 median 0.0221 max 0.146
+ours vs fork, prompt 1000@2000, 1-token steps: argmax agreement 32/32, mean |dlogprob| 0.0288 median 0.0221 max 0.146
+# f_paired.log
+GPU NVIDIA GeForce RTX 5090, 32607 MiB
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain: {"decode_tps": 161.8026759735566, "prefill_tps": 127.92651161356946, "vram_mib": 6698}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_plain_ub64: {"decode_tps": 161.64685819125248, "prefill_tps": 128.27705370790233, "vram_mib": 6562}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_plain: {"decode_tps": 179.29926428218482, "prefill_tps": 1491.5863004023088, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6418}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0.1: {"decode_tps": 240.60801645758832, "prefill_tps": 107.62769117854916, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0: {"decode_tps": 241.07742321985415, "prefill_tps": 108.90016085734604, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 fork_mtp_p0_ub64: {"decode_tps": 241.4350901760062, "prefill_tps": 114.20394347592773, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep0 ours_mtp3: {"decode_tps": 323.584157711029, "prefill_tps": 1491.721046099745, "accept": 0.59465737514518, "tok_per_round": 2.78397212543554, "vram_mib": 6790}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain: {"decode_tps": 161.31718709607688, "prefill_tps": 127.65067393403997, "vram_mib": 6698}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_plain_ub64: {"decode_tps": 160.88978486622415, "prefill_tps": 127.12805471101343, "vram_mib": 6562}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_plain: {"decode_tps": 178.8882027542478, "prefill_tps": 1486.495935508228, "accept": 0.0, "tok_per_round": 1.0, "vram_mib": 6418}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0.1: {"decode_tps": 240.48252819281888, "prefill_tps": 107.80662867890119, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0: {"decode_tps": 240.45997588787588, "prefill_tps": 108.1863150828668, "vram_mib": 7524}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 fork_mtp_p0_ub64: {"decode_tps": 240.82683075804158, "prefill_tps": 113.59157396864325, "vram_mib": 7284}
+[NVIDIA GeForce RTX 5090, 32607 MiB] rep1 ours_mtp3: {"decode_tps": 323.1528198636793, "prefill_tps": 1488.6715737650493, "accept": 0.59465737514518, "tok_per_round": 2.78397212543554, "vram_mib": 6790}
+SUMMARY {"fork_plain": {"decode_tps": 161.8026759735566, "prefill_tps": 127.92651161356946, "vram_mib": 6698}, "fork_plain_ub64": {"decode_tps": 161.64685819125248, "prefill_tps": 128.27705370790233, "vram_mib": 6562}, "ours_plain": {"decode_tps": 179.29926428218482, "prefill_tps": 1491.5863004023088, "vram_mib": 6418}, "fork_mtp_p0.1": {"decode_tps": 240.60801645758832, "prefill_tps": 107.80662867890119, "vram_mib": 7524}, "fork_mtp_p0": {"decode_tps": 241.07742321985415, "prefill_tps": 108.90016085734604, "vram_mib": 7524}, "fork_mtp_p0_ub64": {"decode_tps": 241.4350901760062, "prefill_tps": 114.20394347592773, "vram_mib": 7284}, "ours_mtp3": {"decode_tps": 323.584157711029, "prefill_tps": 1491.721046099745, "vram_mib": 6790}}
+# f_prefill.log
+GPU NVIDIA GeForce RTX 5090 tokens 2048
+[NVIDIA GeForce RTX 5090] ours mtp=0: {"64": {"tps": 3461.0038164002062, "first": 11}, "512": {"tps": 4043.3724864058804, "first": 406}, "2048": {"tps": 3530.886901419682, "first": 466}}
+[NVIDIA GeForce RTX 5090] ours mtp=1: {"64": {"tps": 3387.326409832549, "first": 11}, "512": {"tps": 3928.285421605643, "first": 406}, "2048": {"tps": 3416.6044230050993, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=0: {"64": {"tps": 552.9253205238967, "first": 11}, "512": {"tps": 2898.944602980477, "first": 406}, "2048": {"tps": 3173.9881750342893, "first": 466}}
+[NVIDIA GeForce RTX 5090] fork mtp=1: {"64": {"tps": 456.7187611503604, "first": 11}, "512": {"tps": 1986.9220171915322, "first": 406}, "2048": {"tps": 2491.8206716478744, "first": 466}}
