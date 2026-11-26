@@ -77,6 +77,27 @@ __device__ __forceinline__ float part_sum(const float* y, const int n, const int
     }
     return t;
 }
+// part_sum of N elements at once: all their loads of a batch of 8 partitions are in flight together (the sums are added in the
+// same order as part_sum, so results are bit-identical).  Cards with many SMs use many partitions, where this matters.
+#ifndef PS_BATCH
+#define PS_BATCH 8
+#endif
+template <int N, int B = PS_BATCH>
+__device__ __forceinline__ void part_sum_n(const float* const (&y)[N], const int n, const int stride, float (&t)[N]) {
+#pragma unroll
+    for (int i = 0; i < N; ++i) t[i] = 0;
+    for (int p = 0; p < n; p += B) {
+        float b[N][B];
+#pragma unroll
+        for (int q = 0; q < B; ++q)
+#pragma unroll
+            for (int i = 0; i < N; ++i) b[i][q] = p + q < n ? y[i][(size_t) (p + q) * stride] : 0.0f;
+#pragma unroll
+        for (int i = 0; i < N; ++i)
+#pragma unroll
+            for (int q = 0; q < B; ++q) if (p + q < n) t[i] += b[i][q];
+    }
+}
 
 static const int F_MAGIC_I = 0x4B400000;                        // 1.5 * 2^23 as float: adding an integer to the bits adds it to the value
 #define F_MAGIC_F 12582912.0f
@@ -110,10 +131,10 @@ __global__ __launch_bounds__(256) void prep_kernel(const PrepArgs a, const int m
     float v[4];                                                 // elements tid + 256 i
     if (mode == 0) {
         float acc = 0, t[4];
-#pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            const int e = base + tid + 256 * i;
-            t[i] = part_sum(a.yp + (size_t) k * a.parts * a.yrows + e, a.parts, a.yrows);
+        {
+            const float* yk = a.yp + (size_t) k * a.parts * a.yrows + base + tid;
+            const float* const ys[4] = { yk, yk + 256, yk + 512, yk + 768 };
+            part_sum_n<4>(ys, a.parts, a.yrows, t);
         }
 #pragma unroll
         for (int i = 0; i < 4; ++i) {
@@ -128,19 +149,27 @@ __global__ __launch_bounds__(256) void prep_kernel(const PrepArgs a, const int m
             if ((tid & 31) == 0) atomicAdd(a.ssq + k, (ssq_t) llrint((double) acc * 65536.0));
         }
     } else if (mode == 1) {
+        const float* yk = a.yp + (size_t) k * a.parts * a.yrows + base + tid, *yu = yk + a.upoff;
+        const float* const ys[8] = { yk, yk + 256, yk + 512, yk + 768, yu, yu + 256, yu + 512, yu + 768 };
+        float t[8];
+        part_sum_n<8>(ys, a.parts, a.yrows, t);
 #pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            const int e = base + tid + 256 * i;
-            const float* yk = a.yp + (size_t) k * a.parts * a.yrows;
-            v[i] = silu_f(part_sum(yk + e, a.parts, a.yrows)) * part_sum(yk + a.upoff + e, a.parts, a.yrows);
-        }
+        for (int i = 0; i < 4; ++i) v[i] = silu_f(t[i]) * t[4 + i];
     } else if (mode == 2) {
         float z[4];
+        {
+            const float* ys[4];
+#pragma unroll
+            for (int i = 0; i < 4; ++i) {
+                const int q = seg * 8 + 2 * i + (tid >> 7), h = q / 3 + 16 * (q % 3);
+                ys[i] = a.yp + (size_t) k * a.parts * a.yrows + QKV + h * 128 + (tid & 127);
+            }
+            part_sum_n<4>(ys, a.parts, a.yrows, z);
+        }
 #pragma unroll
         for (int i = 0; i < 4; ++i) {
             const int q = seg * 8 + 2 * i + (tid >> 7), h = q / 3 + 16 * (q % 3);
             v[i] = a.src[(size_t) k * a.n + h * 128 + (tid & 127)];
-            z[i] = part_sum(a.yp + (size_t) k * a.parts * a.yrows + QKV + h * 128 + (tid & 127), a.parts, a.yrows);
             const float ss = warp_sum(v[i] * v[i]);
             if ((tid & 31) == 0) s[i * 8 + (tid >> 5)] = ss;
         }
