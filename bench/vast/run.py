@@ -1,6 +1,6 @@
 """Run one of the Modal bench scripts directly on this machine (after bench/vast/setup.sh).
 
-python bench/vast/run.py consistency|spec|validate_long|paired|prefill
+python bench/vast/run.py consistency|spec|validate_long|paired|prefill|quality:lm|quality:mmlu|quality:gsm8k
 """
 import os, sys
 
@@ -20,5 +20,7 @@ elif which == "paired":
     import paired; paired.run_all()
 elif which == "prefill":
     import prefill; prefill.run()
+elif which.startswith("quality:"):
+    import quality; quality.go(which.split(":")[1], 0)
 else:
     raise SystemExit(f"unknown: {which}")

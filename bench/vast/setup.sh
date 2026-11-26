@@ -5,7 +5,7 @@
 set -euo pipefail
 ROOT=$(pwd)
 apt-get update -qq && apt-get install -y -qq curl libgomp1 libcurl4 > /dev/null
-pip install -q "huggingface_hub[hf_transfer]" numpy requests
+pip install -q "huggingface_hub[hf_transfer]" numpy requests pyarrow
 eval "$(python - <<'EOF'
 import sys; sys.path.insert(0, "bench/vast"); sys.path.insert(0, "bench")
 import modal_common as m
