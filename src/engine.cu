@@ -783,7 +783,8 @@ __global__ __launch_bounds__(256) void gdn_wide_kernel(const float* qkv, const f
 // KV layout per layer: [kvhead 4][ctx][256] fp16
 // ---------------------------------------------------------------------------------------------
 __global__ void attn_prep_kernel(const float* yA, int parts, int yrows, const float* qn, const float* kn,
-                                 float* Q, float* gate, half* kc, half* vc, int ctx, int pos, float theta_base, int hb0) {
+                                 float* Q, float* gate, half* kc, half* vc, int ctx, int pos, float theta_base, int hb0, const int* posd = nullptr) {
+    if (posd) pos = *posd;                                   // graph replay: the position lives in device memory
     __shared__ float sh[256];
     __shared__ float ps[8];
     const int hb = blockIdx.x + hb0, k = blockIdx.y, tid = threadIdx.x;   // 256 threads = 256 dims; hb0 = 24 skips the query heads
@@ -822,7 +823,9 @@ __global__ void attn_prep_kernel(const float* yA, int parts, int yrows, const fl
 // order does not depend on T, so T = 1 / 4 / 8 give bit-identical results.
 static const int ACH = 512;
 template <int T>
-__global__ __launch_bounds__(256, 1) void attn_kernel(const float* Q, const float* gate, const half* kc, const half* vc, int ctx, int pos, float* out, int K, int pstart) {
+__global__ __launch_bounds__(256, 1) void attn_kernel(const float* Q, const float* gate, const half* kc, const half* vc, int ctx, int pos, float* out, int K, int pstart,
+                                                     const int* posd = nullptr) {
+    if (posd) pos = *posd;
     __shared__ float sc[T][ACH];
     __shared__ float red[T][32];
     __shared__ float mxn[T], scl[T], sumt[T], mxo[T];
@@ -1415,16 +1418,21 @@ struct Engine {
         }
     }
 
-    unsigned char* tok_rows = nullptr; unsigned char* tok_ring = nullptr; unsigned ring_n = 0;
-    // upload the PTQ1_0 rows of K tokens and expand them on the GPU; the pinned ring has 8 slots and is drained by a sync every 4 uses
-    void embed_gpu(const int* toks, int K, float* dst) {
-        const size_t rb = 1120, slotb = (size_t) KMAX * rb;
-        if (!tok_rows) { CK(cudaMalloc(&tok_rows, slotb)); CK(cudaHostAlloc(&tok_ring, 8 * slotb, cudaHostAllocDefault)); }
+    unsigned char* tok_rows = nullptr; unsigned char* tok_ring = nullptr; unsigned ring_n = 0; int* d_pos = nullptr;
+    // upload the PTQ1_0 rows of K tokens (and, if pos >= 0, the step position to d_pos); the pinned ring has 8 slots and is drained
+    // by a sync every 4 uses
+    void embed_upload(const int* toks, int K, int pos) {
+        const size_t rb = 1120, rows = (size_t) KMAX * rb, slotb = rows + 16;
+        if (!tok_rows) { CK(cudaMalloc(&tok_rows, rows + 16)); d_pos = (int*) (tok_rows + rows); CK(cudaHostAlloc(&tok_ring, 8 * slotb, cudaHostAllocDefault)); }
         if ((ring_n & 3) == 0) CK(cudaStreamSynchronize(st));
         unsigned char* h = tok_ring + (size_t) (ring_n++ & 7) * slotb;
         const gguf::Tensor& t = f.get("token_embd.weight");
         for (int k = 0; k < K; ++k) memcpy(h + (size_t) k * rb, t.data + (size_t) toks[k] * rb, rb);
         CK(cudaMemcpyAsync(tok_rows, h, (size_t) K * rb, cudaMemcpyHostToDevice, st));
+        if (pos >= 0) { memcpy(h + rows, &pos, 4); CK(cudaMemcpyAsync(d_pos, h + rows, 4, cudaMemcpyHostToDevice, st)); }
+    }
+    void embed_gpu(const int* toks, int K, float* dst) {
+        embed_upload(toks, K, -1);
         embed_kernel<<<dim3(5, K), 256, 0, st>>>(tok_rows, signs[0], dst);
     }
     // --- launches ---
@@ -1468,10 +1476,10 @@ struct Engine {
     }
 
 #define P(name, ...) { PROF_BEGIN(st); for (int _i = 0; _i < (g_prof ? g_rep : 1); ++_i) { __VA_ARGS__; } PROF_END(st, name); }
-    void attn(const float* q_, const float* g_, const half* kc, const half* vc, int pos, float* o_, int K, int pstart) {
-        if (K == 1) attn_kernel<1><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
-        else if (K <= 4) attn_kernel<4><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
-        else if (K <= 8 || pstart) attn_kernel<8><<<dim3(24, (K + 7) / 8), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
+    void attn(const float* q_, const float* g_, const half* kc, const half* vc, int pos, float* o_, int K, int pstart, const int* posd = nullptr) {
+        if (K == 1) attn_kernel<1><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart, posd);
+        else if (K <= 4) attn_kernel<4><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart, posd);
+        else if (K <= 8 || pstart) attn_kernel<8><<<dim3(24, (K + 7) / 8), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart, posd);
         else attn_wide_kernel<<<dim3(24, (K + AW_T - 1) / AW_T), 128, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K);
     }
     void layer(int il, int K, int pos) {
@@ -1495,8 +1503,8 @@ struct Engine {
             }
             P("prep_ssm", prep(2, gout, D_INNER, D_INNER, eff_parts(y.A, K), y.A.yrows, signs[1], y.ssm_norm, 0, ybuf, K));
         } else {
-            P("attn_prep", (attn_prep_kernel<<<dim3(32, K), 256, 0, st>>>(ybuf, eff_parts(y.A, K), y.A.yrows, y.qnorm, y.knorm, Q, gate, y.kc, y.vc, ctx, pos, rope_base, 0)));
-            P("attn", attn(Q, gate, y.kc, y.vc, pos, attn_out, K, 0));
+            P("attn_prep", (attn_prep_kernel<<<dim3(32, K), 256, 0, st>>>(ybuf, eff_parts(y.A, K), y.A.yrows, y.qnorm, y.knorm, Q, gate, y.kc, y.vc, ctx, pos, rope_base, 0, d_pos)));
+            P("attn", attn(Q, gate, y.kc, y.vc, pos, attn_out, K, 0, d_pos));
             P("prep_wo", prep(3, attn_out, D_INNER, D_INNER, 0, 0, signs[1], nullptr, 0, nullptr, K));
         }
         P("mvmB", mvm(y.B, K));
@@ -1507,8 +1515,27 @@ struct Engine {
     }
 
     // runs K tokens at positions pos..; fills hlast, and logits_host if want_logits.  State written into copy cur^1 (not committed)
+    // Steps of up to 8 tokens run as CUDA graphs: one per (K, state copy cur, logits mode), captured on first use.  Every pointer in a
+    // step is fixed and the position is read from d_pos, so a graph replays exactly the launches of step_body.  TR_NOGRAPH=1 disables.
+    std::map<int, cudaGraphExec_t> graphs;
+    const bool use_graphs = getenv("TR_NOGRAPH") == nullptr;
     void step(const int* toks, int K, int pos, int want_logits) {
-        embed_gpu(toks, K, rx);
+        embed_upload(toks, K, pos);
+        if (K > 8 || g_prof || !use_graphs) { step_body(K, pos, want_logits); return; }
+        const int key = (K * 2 + cur) * 4 + want_logits;
+        auto it = graphs.find(key);
+        if (it == graphs.end()) {
+            cudaGraph_t g; cudaGraphExec_t ex;
+            CK(cudaStreamBeginCapture(st, cudaStreamCaptureModeThreadLocal));
+            step_body(K, pos, want_logits);
+            CK(cudaStreamEndCapture(st, &g));
+            CK(cudaGraphInstantiate(&ex, g, 0)); CK(cudaGraphDestroy(g));
+            it = graphs.emplace(key, ex).first;
+        }
+        CK(cudaGraphLaunch(it->second, st));
+    }
+    void step_body(int K, int pos, int want_logits) {
+        embed_kernel<<<dim3(5, K), 256, 0, st>>>(tok_rows, signs[0], rx);
         CK(cudaMemsetAsync(ssq, 0, (size_t) (2 * 64 + 2) * KMAX * sizeof(ssq_t), st));
         for (int il = 0; il < 64; ++il) layer(il, K, pos);
         addres(L[63].D, K, slot(128));
