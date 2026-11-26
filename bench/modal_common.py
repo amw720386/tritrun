@@ -19,7 +19,7 @@ image = (
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
 
-ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89"}
+ARCHS = {"Tesla T4": "sm_75", "NVIDIA A10G": "sm_86", "NVIDIA A10": "sm_86", "NVIDIA L4": "sm_89", "NVIDIA GeForce RTX 5090": "sm_120"}
 GPU = os.environ.get("GPU", "T4")                  # card for the single-card checks: GPU=L4 modal run ...
 
 def gpu_arch():
