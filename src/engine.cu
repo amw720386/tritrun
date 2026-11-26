@@ -43,7 +43,9 @@ __device__ __forceinline__ float warp_sum(float v) {
 }
 typedef unsigned long long ssq_t;                // sums of squares in 2^-16 fixed point: order-independent atomic accumulation
 __device__ __forceinline__ float ssq_rms_inv(const ssq_t v, const int n) {
-    return 1.0f / sqrtf((float) v * (1.0f / 65536.0f / n) + 1e-6f);
+    // correctly rounded: with --use_fast_math, 1/sqrtf compiles to different instruction sequences in different kernels on
+    // sm_120, which broke bit-identity between the fused (K <= 2) and separate (K = 4, 8) gate paths
+    return __frsqrt_rn((float) v * (1.0f / 65536.0f / n) + 1e-6f);
 }
 __device__ __forceinline__ float silu_f(float x) { return x / (1.0f + expf(-x)); }
 __device__ __forceinline__ float softplus_f(float x) { return x > 20.0f ? x : logf(1.0f + expf(x)); }
