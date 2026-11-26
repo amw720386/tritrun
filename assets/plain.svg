@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 460" width="980" height="460" role="img" aria-label="Plain decode">
+<rect width="980" height="460" rx="16" fill="#05080f"/>
+<text x="32" y="44" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="22" fill="#e6edf6">Plain decode</text>
+<text x="32" y="68" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#8a98ad">tokens per second · greedy · 200 new tokens · best of 2 · same machine for both engines</text>
+<line x1="70" x2="950" y1="372" y2="372" stroke="#1c2636"/><text x="60" y="376" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">0</text>
+<line x1="70" x2="950" y1="304" y2="304" stroke="#1c2636"/><text x="60" y="308" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">50</text>
+<line x1="70" x2="950" y1="236" y2="236" stroke="#1c2636"/><text x="60" y="240" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">1e+02</text>
+<line x1="70" x2="950" y1="168" y2="168" stroke="#1c2636"/><text x="60" y="172" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">1.5e+02</text>
+<line x1="70" x2="950" y1="100" y2="100" stroke="#1c2636"/><text x="60" y="104" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">2e+02</text>
+<rect x="146.0" y="323.6" width="31.0" height="48.4" rx="4" fill="#3b82f6"/>
+<text x="161.5" y="317.6" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">36</text>
+<rect x="180.0" y="327.0" width="31.0" height="45.0" rx="4" fill="#8a98ad"/>
+<text x="195.5" y="321.0" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">33</text>
+<text x="180" y="394" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#e6edf6">T4</text>
+<rect x="366.0" y="319.2" width="31.0" height="52.8" rx="4" fill="#3b82f6"/>
+<text x="381.5" y="313.2" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">39</text>
+<rect x="400.0" y="323.0" width="31.0" height="49.0" rx="4" fill="#8a98ad"/>
+<text x="415.5" y="317.0" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">36</text>
+<text x="400" y="394" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#e6edf6">L4</text>
+<rect x="586.0" y="281.7" width="31.0" height="90.3" rx="4" fill="#3b82f6"/>
+<text x="601.5" y="275.7" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">66</text>
+<rect x="620.0" y="288.2" width="31.0" height="83.8" rx="4" fill="#8a98ad"/>
+<text x="635.5" y="282.2" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">62</text>
+<text x="620" y="394" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#e6edf6">A10</text>
+<rect x="806.0" y="128.2" width="31.0" height="243.8" rx="4" fill="#3b82f6"/>
+<text x="821.5" y="122.2" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">179</text>
+<rect x="840.0" y="152.0" width="31.0" height="220.0" rx="4" fill="#8a98ad"/>
+<text x="855.5" y="146.0" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#e6edf6">162</text>
+<text x="840" y="394" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#e6edf6">RTX 5090</text>
+<rect x="70" y="416" width="14" height="14" rx="3" fill="#3b82f6"/><text x="90" y="428" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#8a98ad">tritrun</text>
+<rect x="166.5" y="416" width="14" height="14" rx="3" fill="#8a98ad"/><text x="186.5" y="428" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#8a98ad">PrismML llama.cpp fork</text>
+<text x="948" y="446" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#8a98ad">source: results/release.json · higher is better</text>
+</svg>

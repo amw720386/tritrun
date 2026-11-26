@@ -1,0 +1,190 @@
+# README and charts, built with video-readme-tweet-maker. Every number comes from results/release.json
+# (tools/release_numbers.py writes it from the raw logs) or from the logs named beside it.
+project:
+  name: tritrun
+  emoji: "🌳"
+  tagline: A Ternary-Bonsai-2.5-27B engine that's faster than PrismML's own, on every card we tested.
+  repo: amw720386/tritrun
+hero:
+  title: tritrun
+  subtitle: Ternary-Bonsai-2.5-27B · one CUDA engine · T4 to RTX 5090
+theme: {accent: "#3b82f6", accent2: "#8a98ad", accent3: "#56627a", bg: "#05080f", panel: "#0a111c", line: "#1c2636"}
+badges:
+  - {label: model, message: Ternary-Bonsai-2.5-27B, color: 6f42c1}
+  - {label: format, message: PTQ1_0 GGUF, color: blue}
+  - {label: GPU, message: "T4 · L4 · A10 · RTX 5090", color: 76b900}
+
+numbers:
+  mtp5090:       {file: results/release.json, path: decode.gpu=RTX 5090.ours_mtp, fmt: "{:.1f}"}
+  mtp5090_fork:  {file: results/release.json, path: decode.gpu=RTX 5090.fork_mtp, fmt: "{:.1f}"}
+  mtp5090_gain:  {file: results/release.json, path: decode.gpu=RTX 5090.mtp_gain_pct, unit: "%", fmt: "{:.0f}"}
+  mtpT4_gain:    {file: results/release.json, path: decode.gpu=T4.mtp_gain_pct, unit: "%", fmt: "{:.0f}"}
+  mtpL4_gain:    {file: results/release.json, path: decode.gpu=L4.mtp_gain_pct, unit: "%", fmt: "{:.0f}"}
+  mtpA10_gain:   {file: results/release.json, path: decode.gpu=A10.mtp_gain_pct, unit: "%", fmt: "{:.0f}"}
+  plainT4_gain:  {file: results/release.json, path: decode.gpu=T4.plain_gain_pct, unit: "%", fmt: "{:.0f}"}
+  plain5090_gain: {file: results/release.json, path: decode.gpu=RTX 5090.plain_gain_pct, unit: "%", fmt: "{:.0f}"}
+  vramA10:       {file: results/release.json, path: decode.gpu=A10.mtp_vram_saving_pct, unit: "%", fmt: "{:.0f}"}
+  vram5090:      {file: results/release.json, path: decode.gpu=RTX 5090.mtp_vram_saving_pct, unit: "%", fmt: "{:.0f}"}
+  vramT4:        {file: results/release.json, path: decode.gpu=T4.mtp_vram_saving_pct, unit: "%", fmt: "{:.0f}"}
+  round5090:     {file: results/release.json, path: decode.gpu=RTX 5090.tok_per_round, fmt: "{:.2f}"}
+  pre5090_gain:  {file: results/release.json, path: prefill.gpu=RTX 5090.gain_512_pct, unit: "%", fmt: "{:.0f}"}
+  preA10_2k:     {file: results/release.json, path: prefill.gpu=A10.gain_2048_pct, unit: "%", fmt: "{:+.0f}"}
+  preL4_2k:      {file: results/release.json, path: prefill.gpu=L4.gain_2048_pct, unit: "%", fmt: "{:+.0f}"}
+
+intro: |
+  tritrun is a standalone CUDA inference engine for PrismML's
+  [Ternary-Bonsai-2.5-27B](https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF) in its PTQ1_0 GGUF: weights of -1, 0 and +1, about 6 GB in all, so a
+  27B model fits on a 16 GB T4. It is aimed at the small and mid-range cards where decode is limited by memory bandwidth, and it
+  is compared with PrismML's own llama.cpp fork, the only other engine that runs this file on NVIDIA, at the fork's best settings.
+
+  [![Launch film: a bonsai opens a blossom per token, one twig of 128 ternary leaves is read once and opens four buds, the 64 layers light in turn, and two trees race on an RTX 5090](assets/launch-poster.jpg)](assets/launch.mp4)
+
+  *Launch film (27 s). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and the race runs in real time at each engine's average rate. The tree's shape, the trit values on the twig, the pace of the first three shots and which draft is rejected are illustrative. Made with [`media/film.py`](media/film.py).*
+
+  <p align="center"><img src="assets/race.gif" width="900" alt="Two bonsai trees on an RTX 5090 open one blossom per generated token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 1,207 and 1,618 tokens after 5 seconds"></p>
+
+  *Decode with 3 MTP drafts on an RTX 5090, in real time at each engine's measured average rate.*
+
+tables:
+  - id: decode
+    title: Decode, tokens per second (higher is better)
+    file: results/release.json
+    rows_path: decode
+    columns:
+      - {key: gpu, title: GPU}
+      - {key: fork_plain, title: "Plain, fork", align: right, fmt: "{:.1f}"}
+      - {key: ours_plain, title: "Plain, tritrun", align: right, fmt: "{:.1f}"}
+      - {key: plain_gain_pct, title: "Gain", align: right, fmt: "+{:.0f}%"}
+      - {key: fork_mtp, title: "MTP, fork", align: right, fmt: "{:.1f}"}
+      - {key: ours_mtp, title: "MTP, tritrun", align: right, fmt: "{:.1f}"}
+      - {key: mtp_gain_pct, title: "Gain", align: right, fmt: "+{:.0f}%"}
+      - {key: fork_mtp_vram, title: "MTP VRAM MiB, fork", align: right, fmt: "{:,.0f}"}
+      - {key: ours_mtp_vram, title: "MTP VRAM MiB, tritrun", align: right, fmt: "{:,.0f}"}
+  - id: prefill
+    title: Prefill, tokens per second (higher is better)
+    file: results/release.json
+    rows_path: prefill
+    columns:
+      - {key: gpu, title: GPU}
+      - {key: fork_64, title: "64, fork", align: right, fmt: "{:,.0f}"}
+      - {key: ours_64, title: "64, tritrun", align: right, fmt: "{:,.0f}"}
+      - {key: fork_512, title: "512, fork", align: right, fmt: "{:,.0f}"}
+      - {key: ours_512, title: "512, tritrun", align: right, fmt: "{:,.0f}"}
+      - {key: fork_2048, title: "2,048, fork", align: right, fmt: "{:,.0f}"}
+      - {key: ours_2048, title: "2,048, tritrun", align: right, fmt: "{:,.0f}"}
+charts:
+  - id: mtp
+    type: gbar
+    title: Decode with MTP, 3 drafts
+    subtitle: tokens per second · greedy · 200 new tokens · best of 2 · same machine for both engines
+    file: results/release.json
+    rows_path: decode_rows
+    cat: gpu
+    series: engine
+    y: mtp
+    fmt: "{:.0f}"
+  - id: plain
+    type: gbar
+    title: Plain decode
+    subtitle: tokens per second · greedy · 200 new tokens · best of 2 · same machine for both engines
+    file: results/release.json
+    rows_path: decode_rows
+    cat: gpu
+    series: engine
+    y: plain
+    fmt: "{:.0f}"
+diagrams:
+  - id: step
+    title: One decode step with drafts
+    nodes:
+      - {id: w, label: trit block, sub: "128 weights, -1 / 0 / +1", col: 0, row: 0, kind: io}
+      - {id: d, label: decode once, sub: "into registers", col: 1, row: 0}
+      - {id: x, label: dp4a against every token, sub: "1 real + 3 draft tokens, int8", col: 2, row: 0}
+      - {id: v, label: verify drafts, sub: "keep the agreeing prefix", col: 2, row: 1}
+      - {id: r, label: roll back, sub: "replay recorded inputs", col: 1, row: 1}
+      - {id: o, label: tokens out, sub: "about 2.8 per step", col: 0, row: 1, kind: io}
+    edges:
+      - {from: w, to: d}
+      - {from: d, to: x}
+      - {from: x, to: v}
+      - {from: v, to: r, label: rejected}
+      - {from: v, to: o, label: accepted}
+
+sections:
+  - title: Results
+    emoji: "📈"
+    id: results
+    body: |
+      The fork is `prism-b12178-03ec600` with flash attention, FP16 KV, 4096 context and one slot. Each fork figure is its best
+      setting among those tried: `-ub 512` and `-ub 64`, and MTP with 3 drafts at cut-off 0.1 and 0. Both engines ran in the same
+      container on the same GPU with the same prompt token ids. Decode is 4 short prompts, greedy, 200 new tokens, the better of 2
+      repetitions. VRAM is peak `nvidia-smi` memory against the fork at `-ub 64`, its leanest setting.
+    charts: [mtp, plain]
+    tables: [decode]
+    after: |
+      Full conditions, machine-to-machine spread and the logs behind each figure: [docs/benchmarks.md](docs/benchmarks.md).
+  - title: How fast is prefill?
+    emoji: "⏩"
+    id: prefill
+    body: |
+      Real text, best of 3. Ours is the wall time of the whole prefill plus the first token, and the fork's is its own
+      `prompt_per_second` at its default batch size. The first generated token agreed in every case.
+    tables: [prefill]
+    after: |
+      - ✅ **Decode:** faster on every card, {{ n.plainT4_gain }} to {{ n.plain5090_gain }} plain and {{ n.mtpA10_gain }} to {{ n.mtp5090_gain }} with MTP, where one read of the weights serves every draft.
+      - ✅ **Memory:** {{ n.vramT4 }} to {{ n.vram5090 }} less VRAM with MTP on.
+      - ✅ **Prefill:** faster at 64 and 512 tokens on every card, {{ n.pre5090_gain }} at 512 on the RTX 5090.
+      - 🟰 **Level:** prefill at 2,048 tokens on A10 ({{ n.preA10_2k }} here, and -6% in another container) and close on L4 ({{ n.preL4_2k }}).
+      - 🧪 **Not measured:** H100, B200, consumer RTX 30 and 40 series, contexts over 2,048 tokens, thinking mode.
+  - title: How it works
+    emoji: "🧩"
+    id: how-it-works
+    images:
+      - {src: assets/inside.gif, alt: "One twig of 128 ternary leaves, tilted up, tilted down or bare, is read once and opens four buds together, one token and three drafts. One draft is rejected and drops", width: "900"}
+    diagrams: [step]
+    body_file: docs/readme/how-it-works.md
+  - title: Accuracy
+    emoji: "🎯"
+    id: accuracy
+    body: |
+      Same model file, against the fork and against a control: the fork at another batch size, which shows how far its own
+      rounding moves the results. Prompts use the fork's chat template with thinking off and the fork's tokenizer, so both engines
+      get identical ids. Current build (`results/quality_current.log`):
+
+      | Test | Fork | Control | tritrun | GPU |
+      |---|---:|---:|---:|---|
+      | WikiText-2 perplexity, 10,200 tokens | 9.7154 | 9.7145 | 9.7150 | T4 |
+      | | 9.7147 | 9.7167 | 9.7195 | L4 |
+      | | 9.7161 | 9.7170 | 9.7146 | A10 |
+      | | 9.7107 | 9.7167 | 9.7173 | RTX 5090 |
+      | MMLU, 1,000 questions, correct | 777 | 778 / 776 | 778 | A10 |
+      | | 777 | 776 / 779 | 778 | RTX 5090 |
+      | GSM8K, 300 questions, correct | 282 | 283 | 280 | A10 |
+      | | 282 | 282 | 284 | RTX 5090 |
+
+      - 🟰 **Level with the fork,** within the fork's own run-to-run spread on every card: median KL 9e-5 for both tritrun and the control, and top-1 agreement 99.3 to 99.4% (control 99.3 to 99.5%).
+      - ✅ **Exact where it should be:** steps of 1, 2, 4 and 8 tokens give bit-identical logits, repeated runs are bit-identical, and speculative output equals plain greedy output, on all four cards.
+      - 🧪 **Not shown:** accuracy differences of about a point or less on these samples, thinking mode, long contexts, other samplers, MMLU and GSM8K on T4 and L4.
+
+      Every check, the earlier build's tables and the outlier analysis: [docs/validation.md](docs/validation.md).
+quickstart:
+  - title: Linux, an NVIDIA GPU (Turing or newer), CUDA 12 (12.8 or newer for RTX 50-series), Python 3.10+
+    shell: |
+      pip install -r requirements.txt
+      hf download prism-ml/Ternary-Bonsai-2.5-27B-GGUF Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf --local-dir .
+      bash build.sh
+      python -m tritrun.cli Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf "Write a haiku about autumn." --drafts 3
+caveats:
+  - "`--drafts 0` is plain decode. The prompt goes through a minimal ChatML template, not the full template in the GGUF (no tools, no reasoning controls)."
+  - "Greedy only, one sequence, text only, context up to 8192, no KV quantization, no server. Linux and NVIDIA only."
+  - "The final numbers come from one machine per card, and machines of one type differ by several percent ([details](docs/benchmarks.md))."
+  - "`build.sh` (the multi-architecture build) was run on the RTX 5090 machine with CUDA 12.8 and produced code for sm_75 to sm_120. The benchmarks compile one architecture at a time with the same flags. B200 (sm_100) and H100 were not tested."
+repo_map:
+  - {path: src/, desc: "the CUDA engine and the GGUF reader"}
+  - {path: tritrun/, desc: "Python package and command line"}
+  - {path: bench/, desc: "Modal harnesses for speed, correctness and quality"}
+  - {path: results/, desc: "raw logs; release.json is what this page reads"}
+  - {path: tools/release_numbers.py, desc: "raw logs to release.json"}
+  - {path: docs/, desc: "benchmarks and validation in full"}
+  - {path: media/film.py, desc: "the launch film", generated: true}
+footer: "Built at Magni."

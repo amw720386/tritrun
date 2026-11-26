@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 408" width="1150" height="408" role="img" aria-label="One decode step with drafts">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8a98ad"/></marker></defs>
+<rect width="1150" height="408" rx="16" fill="#05080f"/>
+<text x="40" y="42" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="22" fill="#e6edf6">One decode step with drafts</text>
+<polyline points="310,132 375,132 375,132 440,132" fill="none" stroke="#8a98ad" stroke-width="2.2" marker-end="url(#ah)"/>
+<polyline points="710,132 775,132 775,132 840,132" fill="none" stroke="#8a98ad" stroke-width="2.2" marker-end="url(#ah)"/>
+<polyline points="975,184 975,264" fill="none" stroke="#8a98ad" stroke-width="2.2" marker-end="url(#ah)"/>
+<polyline points="840,316 775,316 775,316 710,316" fill="none" stroke="#8a98ad" stroke-width="2.2" marker-end="url(#ah)"/>
+<text x="775" y="308" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">rejected</text>
+<polyline points="840,316 575,316 575,316 310,316" fill="none" stroke="#8a98ad" stroke-width="2.2" marker-end="url(#ah)"/>
+<text x="575" y="308" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">accepted</text>
+<rect x="40" y="80" width="270" height="104" rx="12" fill="#0a111c" stroke="#3ddc97" stroke-width="2"/>
+<text x="175.0" y="118" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">trit block</text>
+<text x="175.0" y="142" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">128 weights, -1 / 0 / +1</text>
+<rect x="440" y="80" width="270" height="104" rx="12" fill="#0a111c" stroke="#3b82f6" stroke-width="2"/>
+<text x="575.0" y="118" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">decode once</text>
+<text x="575.0" y="142" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">into registers</text>
+<rect x="840" y="80" width="270" height="104" rx="12" fill="#0a111c" stroke="#3b82f6" stroke-width="2"/>
+<text x="975.0" y="118" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">dp4a against every token</text>
+<text x="975.0" y="142" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">1 real + 3 draft tokens, int8</text>
+<rect x="840" y="264" width="270" height="104" rx="12" fill="#0a111c" stroke="#3b82f6" stroke-width="2"/>
+<text x="975.0" y="302" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">verify drafts</text>
+<text x="975.0" y="326" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">keep the agreeing prefix</text>
+<rect x="440" y="264" width="270" height="104" rx="12" fill="#0a111c" stroke="#3b82f6" stroke-width="2"/>
+<text x="575.0" y="302" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">roll back</text>
+<text x="575.0" y="326" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">replay recorded inputs</text>
+<rect x="40" y="264" width="270" height="104" rx="12" fill="#0a111c" stroke="#3ddc97" stroke-width="2"/>
+<text x="175.0" y="302" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-weight="700" font-size="19" fill="#e6edf6">tokens out</text>
+<text x="175.0" y="326" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8a98ad">about 2.8 per step</text>
+</svg>
