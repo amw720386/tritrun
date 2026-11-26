@@ -1,0 +1,236 @@
+{
+ "decode": [
+  {
+   "gpu": "T4",
+   "fork_plain": 33.1,
+   "ours_plain": 35.6,
+   "plain_gain_pct": 7.71,
+   "fork_mtp": 46.8,
+   "ours_mtp": 60.1,
+   "mtp_gain_pct": 28.38,
+   "fork_plain_vram": 6038,
+   "ours_plain_vram": 6024,
+   "fork_mtp_vram": 6738,
+   "ours_mtp_vram": 6396,
+   "mtp_vram_saving_pct": 5.08,
+   "tok_per_round": 2.81
+  },
+  {
+   "gpu": "L4",
+   "fork_plain": 36.0,
+   "ours_plain": 38.8,
+   "plain_gain_pct": 7.61,
+   "fork_mtp": 63.7,
+   "ours_mtp": 73.7,
+   "mtp_gain_pct": 15.74,
+   "fork_plain_vram": 6145,
+   "ours_plain_vram": 6115,
+   "fork_mtp_vram": 6853,
+   "ours_mtp_vram": 6487,
+   "mtp_vram_saving_pct": 5.34,
+   "tok_per_round": 2.79
+  },
+  {
+   "gpu": "A10",
+   "fork_plain": 61.6,
+   "ours_plain": 66.4,
+   "plain_gain_pct": 7.77,
+   "fork_mtp": 99.5,
+   "ours_mtp": 112.7,
+   "mtp_gain_pct": 13.18,
+   "fork_plain_vram": 6191,
+   "ours_plain_vram": 6153,
+   "fork_mtp_vram": 6899,
+   "ours_mtp_vram": 6525,
+   "mtp_vram_saving_pct": 5.42,
+   "tok_per_round": 2.8
+  },
+  {
+   "gpu": "RTX 5090",
+   "fork_plain": 161.8,
+   "ours_plain": 179.3,
+   "plain_gain_pct": 10.81,
+   "fork_mtp": 241.4,
+   "ours_mtp": 323.6,
+   "mtp_gain_pct": 34.03,
+   "fork_plain_vram": 6562,
+   "ours_plain_vram": 6418,
+   "fork_mtp_vram": 7284,
+   "ours_mtp_vram": 6790,
+   "mtp_vram_saving_pct": 6.78,
+   "tok_per_round": 2.78
+  }
+ ],
+ "prefill": [
+  {
+   "gpu": "T4",
+   "fork_64": 208,
+   "ours_64": 352,
+   "gain_64_pct": 69.63,
+   "fork_512": 331,
+   "ours_512": 412,
+   "gain_512_pct": 24.45,
+   "fork_2048": 341,
+   "ours_2048": 403,
+   "gain_2048_pct": 18.19
+  },
+  {
+   "gpu": "L4",
+   "fork_64": 367,
+   "ours_64": 745,
+   "gain_64_pct": 103.17,
+   "fork_512": 741,
+   "ours_512": 827,
+   "gain_512_pct": 11.51,
+   "fork_2048": 788,
+   "ours_2048": 811,
+   "gain_2048_pct": 2.96
+  },
+  {
+   "gpu": "A10",
+   "fork_64": 500,
+   "ours_64": 998,
+   "gain_64_pct": 99.43,
+   "fork_512": 913,
+   "ours_512": 994,
+   "gain_512_pct": 8.91,
+   "fork_2048": 951,
+   "ours_2048": 966,
+   "gain_2048_pct": 1.56
+  },
+  {
+   "gpu": "RTX 5090",
+   "fork_64": 553,
+   "ours_64": 3461,
+   "gain_64_pct": 525.94,
+   "fork_512": 2899,
+   "ours_512": 4043,
+   "gain_512_pct": 39.48,
+   "fork_2048": 3174,
+   "ours_2048": 3531,
+   "gain_2048_pct": 11.24
+  }
+ ],
+ "sources": {
+  "T4": [
+   "paired_graphs.log",
+   "m_paired_t4.log",
+   "m_prefill_t4.log"
+  ],
+  "L4": [
+   "paired_graphs.log",
+   "m_paired_l4.log",
+   "m_prefill_l4.log"
+  ],
+  "A10": [
+   "paired_graphs.log",
+   "m_paired_a10.log",
+   "m_pre_ab_a10.log"
+  ],
+  "RTX 5090": [
+   "rtx5090_graphs.log",
+   "f_paired.log",
+   "f_prefill.log"
+  ]
+ },
+ "decode_rows": [
+  {
+   "gpu": "T4",
+   "engine": "tritrun",
+   "plain": 35.6,
+   "mtp": 60.1
+  },
+  {
+   "gpu": "L4",
+   "engine": "tritrun",
+   "plain": 38.8,
+   "mtp": 73.7
+  },
+  {
+   "gpu": "A10",
+   "engine": "tritrun",
+   "plain": 66.4,
+   "mtp": 112.7
+  },
+  {
+   "gpu": "RTX 5090",
+   "engine": "tritrun",
+   "plain": 179.3,
+   "mtp": 323.6
+  },
+  {
+   "gpu": "T4",
+   "engine": "PrismML llama.cpp fork",
+   "plain": 33.1,
+   "mtp": 46.8
+  },
+  {
+   "gpu": "L4",
+   "engine": "PrismML llama.cpp fork",
+   "plain": 36.0,
+   "mtp": 63.7
+  },
+  {
+   "gpu": "A10",
+   "engine": "PrismML llama.cpp fork",
+   "plain": 61.6,
+   "mtp": 99.5
+  },
+  {
+   "gpu": "RTX 5090",
+   "engine": "PrismML llama.cpp fork",
+   "plain": 161.8,
+   "mtp": 241.4
+  }
+ ],
+ "prefill_rows": [
+  {
+   "gpu": "T4",
+   "engine": "tritrun",
+   "t512": 412,
+   "t2048": 403
+  },
+  {
+   "gpu": "L4",
+   "engine": "tritrun",
+   "t512": 827,
+   "t2048": 811
+  },
+  {
+   "gpu": "A10",
+   "engine": "tritrun",
+   "t512": 994,
+   "t2048": 966
+  },
+  {
+   "gpu": "RTX 5090",
+   "engine": "tritrun",
+   "t512": 4043,
+   "t2048": 3531
+  },
+  {
+   "gpu": "T4",
+   "engine": "PrismML llama.cpp fork",
+   "t512": 331,
+   "t2048": 341
+  },
+  {
+   "gpu": "L4",
+   "engine": "PrismML llama.cpp fork",
+   "t512": 741,
+   "t2048": 788
+  },
+  {
+   "gpu": "A10",
+   "engine": "PrismML llama.cpp fork",
+   "t512": 913,
+   "t2048": 951
+  },
+  {
+   "gpu": "RTX 5090",
+   "engine": "PrismML llama.cpp fork",
+   "t512": 2899,
+   "t2048": 3174
+  }
+ ]
+}
