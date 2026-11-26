@@ -20,7 +20,7 @@ def run():
     lib.tr_test_attn.restype = ctypes.c_double; lib.tr_test_attn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
     for il in (0, 3):
         print(f"layer {il}: wide matmul vs decode matmul, max error / max|y|:", {"ABCD"[w]: [f"{lib.tr_test_tile(e, il, k, w):.1e}" for k in (9, 32, 37, 64, 65, 128)] for w in range(4)}, flush=True)
-    for k in (1, 4, 9):
+    for k in (1, 4, 9, 16, 37, 128):
         print(f"attention (K={k}) vs CPU reference, max error / max|out|:", {L: f"{lib.tr_test_attn(e, 3, L, k):.1e}" for L in (0, 5, 300, 511, 512, 513, 1500, 3000)}, flush=True)
     toks = [1024 + (i * 37) % 4000 for i in range(200)]
     lib.tr_reset.argtypes = [ctypes.c_void_p]

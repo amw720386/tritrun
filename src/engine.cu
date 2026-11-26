@@ -973,6 +973,126 @@ __global__ void swiglu_kernel(const float* g, const float* u, float* out, int n)
 }
 // Q4_0 matrix-vector for T tokens per block: nib [nblk][4][R] words, scale [nblk][R] fp16; x [k][C], y [k][ystride]; rows r0..r0+nr.
 // A block owns 64 rows x 8 column parts, and each thread requests two 32-weight blocks at a time, to keep the memory system busy.
+// wide steps: attention on FP16 tensor cores.  Block = (query head, 16 tokens), 4 warps; K/V chunks of 32 positions are staged in
+// shared memory.  Warp w scores positions 8w..8w+7 of a chunk against all 16 tokens, the softmax is evaluated online across the warps,
+// and warp w accumulates output dimensions 64w..64w+63.  Queries and probabilities are rounded to FP16 (as in the fork's kernels).
+__device__ __forceinline__ void ldsm_x4(u32 (&r)[4], const void* p) {
+    const u32 a = (u32) __cvta_generic_to_shared(p);
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a));
+}
+__device__ __forceinline__ void ldsm_x4_t(u32 (&r)[4], const void* p) {
+    const u32 a = (u32) __cvta_generic_to_shared(p);
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0, %1, %2, %3}, [%4];" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a));
+}
+__device__ __forceinline__ void mma_f16(float (&d)[4], const u32 (&a)[4], const u32 b0, const u32 b1) {
+#if __CUDA_ARCH__ >= 800
+    asm("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%0, %1, %2, %3};"
+        : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b0), "r"(b1));
+#else
+    asm("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5}, {%6}, {%0, %1, %2, %3};"
+        : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(b0));
+    asm("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5}, {%6}, {%0, %1, %2, %3};"
+        : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3]) : "r"(a[2]), "r"(a[3]), "r"(b1));
+#endif
+}
+__device__ __forceinline__ u32 pack_h2(float a, float b) { const __half2 h = __floats2half2_rn(a, b); return *(const u32*) &h; }
+
+static const int AW_T = 16, AW_P = 32, AW_S = 256 + 8;          // tokens per block, positions per chunk, padded row (halves)
+__global__ __launch_bounds__(128) void attn_wide_kernel(const float* Q, const float* gate, const half* kc, const half* vc, int ctx, int pos, float* out, int K) {
+    __shared__ __align__(16) half sQ[AW_T][AW_S];
+    __shared__ __align__(16) half sK[AW_P][AW_S];
+    __shared__ __align__(16) half sV[AW_P][AW_S];
+    __shared__ __align__(16) half sP[AW_T][AW_P + 8];
+    __shared__ float smax[4][AW_T], ssum[4][AW_T];
+    const int h = blockIdx.x, k0 = blockIdx.y * AW_T, tid = threadIdx.x, w = tid >> 5, lane = tid & 31, g = lane >> 2, t4 = lane & 3;
+    const int kvh = h / 6, nt = min(AW_T, K - k0);
+    const half* Kp = kc + (size_t) kvh * ctx * 256;
+    const half* Vp = vc + (size_t) kvh * ctx * 256;
+    for (int i = tid; i < AW_T * 128; i += 128) {                // queries as FP16 (rows of absent tokens are zero)
+        const int r = i >> 7, c = (i & 127) * 2;
+        float2 v = make_float2(0, 0);
+        if (r < nt) v = *(const float2*) &Q[((size_t) (k0 + r) * 24 + h) * 256 + c];
+        *(__half2*) &sQ[r][c] = __floats2half2_rn(v.x, v.y);
+    }
+    float o[8][4];
+#pragma unroll
+    for (int j = 0; j < 8; ++j) o[j][0] = o[j][1] = o[j][2] = o[j][3] = 0.0f;
+    float m_[2] = { -1e30f, -1e30f }, l_[2] = { 0.0f, 0.0f };      // rows g and g + 8
+    const int L = pos + k0 + nt;                                 // positions 0..L-1 are visible to some token of the block
+    for (int c0 = 0; c0 < L; c0 += AW_P) {
+        __syncthreads();
+        for (int i = tid; i < AW_P * 32; i += 128) {             // 16-byte pieces of K and V rows (zero past L)
+            const int r = i >> 5, c = (i & 31) * 8;
+            uint4 kv = make_uint4(0, 0, 0, 0), vv = make_uint4(0, 0, 0, 0);
+            if (c0 + r < L) { kv = *(const uint4*) &Kp[(size_t) (c0 + r) * 256 + c]; vv = *(const uint4*) &Vp[(size_t) (c0 + r) * 256 + c]; }
+            *(uint4*) &sK[r][c] = kv; *(uint4*) &sV[r][c] = vv;
+        }
+        __syncthreads();
+        float sc[4] = { 0, 0, 0, 0 };                            // scores: rows g, g + 8; positions 8w + 2 t4 + (0, 1)
+#pragma unroll
+        for (int ks = 0; ks < 16; ks += 2) {
+            u32 a0[4], a1[4], b[4];
+            ldsm_x4(a0, &sQ[lane & 15][ks * 16 + (lane >> 4) * 8]);
+            ldsm_x4(a1, &sQ[lane & 15][(ks + 1) * 16 + (lane >> 4) * 8]);
+            ldsm_x4(b, &sK[8 * w + (lane & 7)][ks * 16 + (lane >> 3) * 8]);
+            mma_f16(sc, a0, b[0], b[1]);
+            mma_f16(sc, a1, b[2], b[3]);
+        }
+        float pm[2];
+#pragma unroll
+        for (int u = 0; u < 2; ++u) {
+            const int tok = k0 + g + 8 * u;
+#pragma unroll
+            for (int v = 0; v < 2; ++v) { const int pp = c0 + 8 * w + 2 * t4 + v; sc[2 * u + v] = pp <= pos + tok ? sc[2 * u + v] * 0.0625f : -1e30f; }
+            pm[u] = fmaxf(sc[2 * u], sc[2 * u + 1]);
+            pm[u] = fmaxf(pm[u], __shfl_xor_sync(0xFFFFFFFFu, pm[u], 1)); pm[u] = fmaxf(pm[u], __shfl_xor_sync(0xFFFFFFFFu, pm[u], 2));
+        }
+        if (t4 == 0) { smax[w][g] = pm[0]; smax[w][g + 8] = pm[1]; }
+        __syncthreads();
+        float al[2];
+#pragma unroll
+        for (int u = 0; u < 2; ++u) {
+            const int r = g + 8 * u;
+            const float cm = fmaxf(fmaxf(smax[0][r], smax[1][r]), fmaxf(smax[2][r], smax[3][r])), nm = fmaxf(m_[u], cm);
+            al[u] = expf(m_[u] - nm); m_[u] = nm;
+            const float p0 = expf(sc[2 * u] - nm), p1 = expf(sc[2 * u + 1] - nm);
+            *(__half2*) &sP[r][8 * w + 2 * t4] = __floats2half2_rn(p0, p1);
+            float ps = p0 + p1; ps += __shfl_xor_sync(0xFFFFFFFFu, ps, 1); ps += __shfl_xor_sync(0xFFFFFFFFu, ps, 2);
+            if (t4 == 0) ssum[w][r] = ps;
+        }
+#pragma unroll
+        for (int j = 0; j < 8; ++j) { o[j][0] *= al[0]; o[j][1] *= al[0]; o[j][2] *= al[1]; o[j][3] *= al[1]; }
+        __syncthreads();
+#pragma unroll
+        for (int u = 0; u < 2; ++u) { const int r = g + 8 * u; l_[u] = l_[u] * al[u] + ssum[0][r] + ssum[1][r] + ssum[2][r] + ssum[3][r]; }
+#pragma unroll
+        for (int kk = 0; kk < AW_P / 16; ++kk) {
+            u32 a[4];
+            ldsm_x4(a, &sP[lane & 15][kk * 16 + (lane >> 4) * 8]);
+#pragma unroll
+            for (int j = 0; j < 8; j += 2) {
+                u32 b[4];
+                ldsm_x4_t(b, &sV[kk * 16 + (lane & 15)][64 * w + 8 * j + (lane >> 4) * 8]);
+                mma_f16(o[j], a, b[0], b[1]);
+                mma_f16(o[j + 1], a, b[2], b[3]);
+            }
+        }
+    }
+#pragma unroll
+    for (int u = 0; u < 2; ++u) {
+        const int r = g + 8 * u;
+        if (r >= nt) continue;
+        const int k = k0 + r;
+        const float il = 1.0f / l_[u];
+#pragma unroll
+        for (int j = 0; j < 8; ++j)
+#pragma unroll
+            for (int v = 0; v < 2; ++v) {
+                const int d = h * 256 + 64 * w + 8 * j + 2 * t4 + v;
+                out[(size_t) k * D_INNER + d] = o[j][2 * u + v] * il * gate[(size_t) k * D_INNER + d];
+            }
+    }
+}
 template <int T>
 __global__ __launch_bounds__(512, 1) void q4mv_kernel(const u32* nib, const half* sc, const float* x, float* y, int R, int r0, int nblk, int ystride, int K) {
     __shared__ float ps[T][8][64];
@@ -1349,7 +1469,8 @@ struct Engine {
     void attn(const float* q_, const float* g_, const half* kc, const half* vc, int pos, float* o_, int K, int pstart) {
         if (K == 1) attn_kernel<1><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
         else if (K <= 4) attn_kernel<4><<<dim3(24, 1), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
-        else attn_kernel<8><<<dim3(24, (K + 7) / 8), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
+        else if (K <= 8 || pstart) attn_kernel<8><<<dim3(24, (K + 7) / 8), 256, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K, pstart);
+        else attn_wide_kernel<<<dim3(24, (K + AW_T - 1) / AW_T), 128, 0, st>>>(q_, g_, kc, vc, ctx, pos, o_, K);
     }
     void layer(int il, int K, int pos) {
         Layer& y = L[il];
@@ -1572,7 +1693,7 @@ double tr_test_attn(void* p, int il, int L, int K) {
     for (size_t i = 0; i < nk; ++i) { kh[i] = __float2half((rand() % 2000 - 1000) / 1000.0f * 1.5f); vh[i] = __float2half((rand() % 2000 - 1000) / 1000.0f); kf[i] = __half2float(kh[i]); vf[i] = __half2float(vh[i]); }
     CK(cudaMemcpy(e->Q, q.data(), nq * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(e->gate, g.data(), nq * 4, cudaMemcpyHostToDevice));
     CK(cudaMemcpy(y.kc, kh.data(), nk * 2, cudaMemcpyHostToDevice)); CK(cudaMemcpy(y.vc, vh.data(), nk * 2, cudaMemcpyHostToDevice));
-    const int ps = L > 0 ? 1 : 0;                         // also exercises the first-visible-position argument
+    const int ps = L > 0 && K <= 8 ? 1 : 0;               // also exercises the first-visible-position argument (wide steps never use it)
     e->attn(e->Q, e->gate, y.kc, y.vc, L, e->attn_out, K, ps); e->sync(); CK(cudaMemcpy(a.data(), e->attn_out, nq * 4, cudaMemcpyDeviceToHost));
     double worst = 0, scale = 0;
     std::vector<double> ref(nq, 0.0);
