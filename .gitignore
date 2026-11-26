@@ -4,3 +4,7 @@ __pycache__/
 *.log
 .venv/
 !results/*.log
+.claude/
+CLAUDE.md
+AGENTS.md
+.env*
