@@ -7,15 +7,16 @@ import ctypes, json, os, subprocess, sys, time
 import modal
 from modal_common import VOL, GGUF, image, ARCHS
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-app = modal.App("bonsai25-engine-prefill", image=image.add_local_python_source("modal_common")
-                .add_local_dir(os.path.join(ROOT, "src"), "/src"))
+_img = image.add_local_python_source("modal_common").add_local_dir(os.path.join(ROOT, "src"), "/src")
+if os.environ.get("BASE_SRC"): _img = _img.add_local_dir(os.environ["BASE_SRC"], "/src_base")   # optional: an older src/, timed next to the current one
+app = modal.App("bonsai25-engine-prefill", image=_img)
 W = f"/w/{GGUF}"
 WP = "/w/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf"
 
 CHILD = r'''
-import ctypes, json, sys, time
+import ctypes, json, os, sys, time
 toks = json.load(open("/tmp/ptoks.json")); mtp = int(sys.argv[1])
-lib = ctypes.CDLL("/tmp/l.so")
+lib = ctypes.CDLL(os.environ.get("TR_LIB", "/tmp/l.so"))
 lib.tr_load.restype = ctypes.c_void_p; lib.tr_load.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
 lib.tr_generate.restype = ctypes.c_int
 lib.tr_generate.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_double)]
@@ -37,6 +38,11 @@ def run(prof=False, fork=True):
     gname = subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True, text=True).strip()
     r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l.so /src/engine.cu", shell=True, capture_output=True, text=True)
     if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build")
+    libs = [("ours", "/tmp/l.so")]
+    if os.path.exists("/src_base/engine.cu"):
+        r = subprocess.run(f"nvcc -O3 -std=c++17 -arch={ARCHS[gname]} --use_fast_math -shared -Xcompiler -fPIC -o /tmp/l_base.so /src_base/engine.cu", shell=True, capture_output=True, text=True)
+        if r.returncode: print(r.stderr[-3000:]); raise SystemExit("build base")
+        libs = [("ours", "/tmp/l.so"), ("base", "/tmp/l_base.so"), ("ours", "/tmp/l.so"), ("base", "/tmp/l_base.so")]
     ls = subprocess.check_output("find /opt/prism -name llama-server -type f | head -1", shell=True, text=True).strip()
     env = {**os.environ, "LD_LIBRARY_PATH": os.path.dirname(ls)}
     # real text: the CUDA licence/readme shipped in the image
@@ -53,10 +59,11 @@ def run(prof=False, fork=True):
     json.dump(toks, open("/tmp/ptoks.json", "w"))
     open("/tmp/child.py", "w").write(CHILD)
     print("GPU", gname, "tokens", len(toks), flush=True)
-    for mtp in (0, 1):
-        o = subprocess.run([sys.executable, "/tmp/child.py", str(mtp)] + (["prof"] if prof else []), capture_output=True, text=True, env={**os.environ, **({"TR_PROF": "1"} if prof else {})})
+    for name, lib in libs:
+      for mtp in (0, 1):
+        o = subprocess.run([sys.executable, "/tmp/child.py", str(mtp)] + (["prof"] if prof else []), capture_output=True, text=True, env={**os.environ, "TR_LIB": lib, **({"TR_PROF": "1"} if prof else {})})
         line = [l for l in o.stdout.splitlines() if l.startswith("RES")]
-        print(f"[{gname}] ours mtp={mtp}:", line[0][4:] if line else o.stderr[-1500:], flush=True)
+        print(f"[{gname}] {name} mtp={mtp}:", line[0][4:] if line else o.stderr[-1500:], flush=True)
         if prof: print(o.stderr[-9000:], flush=True)
     if not fork: return
     for mtp in (0, 1):
