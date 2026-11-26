@@ -100,10 +100,26 @@ disabled and the fork's tokenizer, so both engines get identical ids.
   looked bad, one stayed outside the fork's range on T4 for every step split: log-probability -0.26 to -0.34
   against -0.03 to -0.24.
 
-The tables were measured before the prefill changes listed under "How it works" (wide matmul, recurrent and
-attention kernels). Re-run on the current version: WikiText-2 perplexity 9.7162 on L4 (fork 9.7147, control
-9.7167), median KL 9e-5 and 99th percentile 0.0018 as before, top-1 agreement 99.1% (was 99.4%, control 99.4%);
-MMLU 778 correct on A10G (fork 778, control 775), the fork's choice on 1000 of 1000 questions.
+The tables were measured before the prefill and decode changes listed under "How it works". Re-run on the current
+version (`results/quality_current.log`), fork / fork control / ours:
+
+| Test | Fork | Control | Ours | Hardware |
+|---|---|---|---|---|
+| WikiText-2 perplexity | 9.7154 | 9.7145 | 9.7150 | T4 |
+| | 9.7147 | 9.7167 | 9.7195 | L4 |
+| | 9.7161 | 9.7170 | 9.7146 | A10 |
+| | 9.7107 | 9.7167 | 9.7173 | RTX 5090 |
+| MMLU, 1,000 questions, correct | 777 | 778 / 776 | 778 | A10 |
+| | 777 | 776 / 779 | 778 | RTX 5090 |
+| GSM8K, 300 questions, 2,048-token limit, correct | 282 | 283 | 280 | A10 |
+| | 282 | 282 | 284 | RTX 5090 |
+
+Median KL 9e-5 on every card (control 9e-5), 99th percentile 0.0018 to 0.0019 (control 0.0018 to 0.0021), top-1
+agreement 99.3 to 99.4% (control 99.3 to 99.5%). Mean negative log-likelihood, ours minus the fork: -0.00014 to
++0.00068, at most 1.7 standard errors; on the RTX 5090 the control is 0.0006 from the fork too. MMLU: the fork's
+choice on 998 (A10) and 996 (RTX 5090) of 1000 questions, controls 998 to 999. GSM8K: the fork's final number on
+291 (A10) and 295 (RTX 5090) of 300, controls 292 and 295. On A10 the three questions that only the fork got
+right again end with ours still checking its working at the length limit.
 
 What this does not show: accuracy differences of about a point or less on these samples; results with thinking
 enabled, with long contexts, or with other samplers; MMLU and GSM8K on T4 and L4. `bench/quality.py`,
