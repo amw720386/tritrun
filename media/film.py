@@ -1,39 +1,46 @@
-"""The launch film. Rates come from results/release.json (built from the logs by tools/release_numbers.py); the layer
-count and block size from src/engine.cu. The trits on screen are drawn uniformly, like the real ones, but are not the file's.
+"""The launch explainer, square. Rates come from results/release.json (built from the logs by tools/release_numbers.py);
+the layer count and block size from src/engine.cu. The trits on screen are drawn uniformly, like the real ones, but are
+not the file's, and the token widths on the two pages are illustrative (both pages show the same sequence, as greedy
+decoding of one model file does).
 
     python tools/release_numbers.py
-    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir>
+    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080
 
- 0.0  one bonsai in a shallow pot; tokens open on it as blossoms, one per step
- 4.6  fly into one twig: a block of 128 leaves, each -1 (down), 0 (absent) or +1 (up); read once, four buds open, one is pruned
-10.8  pull out: 64 branches, one per layer, a step climbs them all
-15.0  cut: two bonsai on one RTX 5090, a blossom per token at the measured rates, in real time, for 5 s
-21.4  the two crowns after the same 5 s, the ratio, the repository and the mark
+ 0.0  one block of 128 weights: +1 stands up, 0 lies flat, -1 sinks
+ 3.4  a read sweeps the block once, and four tokens light together (one token and three drafts)
+ 6.6  pull back: the block is one of many in a layer, and every step reads all 64 layers
+10.6  cut: the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
+15.0  hold on the two pages: the ratio
 """
 import math
 
 import numpy as np
 
 try:
+    import bpy
     import kit
     from mathutils import Vector
 except ImportError:          # the overlay runs without Blender
     kit = None
 
-DURATION = 27.0
+DURATION = 17.5
 S = {}
-LAYERS, BLOCK = 64, 128          # src/engine.cu: NL = 64 (every 4th layer is attention), 128-weight trit blocks
-TWIGS = 7                        # twigs per branch pad (illustrative)
-SLOTS = 1800                     # blossom places on a crown
-DRAFTS = 3
-SWEEP0, SWEEP1 = 6.45, 7.75      # the twig is read
-BUDS, PRUNE = 7.95, 9.15         # four buds open together; one draft is rejected
-PASSES = (12.0, 13.55)          # two steps climb the 64 layers
-PASS = 1.2
-CUT = 15.0
-RACE0, RACE_LEN = 15.7, 5.0
-END = 21.4
-RACE_X = 1.42                    # fork on the left, ours on the right
+LAYERS, BLOCK = 64, 128          # src/engine.cu: NL = 64, 128-weight trit blocks
+COLS, ROWS = 16, 8               # the block's tiles
+P = 0.1                          # tile pitch
+BX, BY = 12, 8                   # blocks per layer plate (illustrative)
+BW, BD = COLS * P + 0.2, ROWS * P + 0.2
+GAP = 0.26                       # between layer plates
+HERO = (5, 3)                    # the block we start on
+SWEEP0, SWEEP1, LIGHT = 3.7, 5.0, 5.05
+PULL0, PULL1 = 6.4, 9.4
+PASSES = (8.9, 9.75)
+PASS = 0.75
+CUT = 10.6
+RACE0, RACE_LEN = 10.9, 4.0
+PAGE_W, LINE_H, TILE_H = 6.0, 0.2, 0.12
+RACE_X = 400.0                   # the race stage is far from the tower
+PAGE_GAP = 1.6
 
 
 def rate(data):
@@ -41,474 +48,180 @@ def rate(data):
     return d["fork_mtp"], d["ours_mtp"]
 
 
-# --- geometry -------------------------------------------------------------------------------------------------------
-def spline(C, n):
-    C = np.asarray(C, float)
-    P = np.vstack([2 * C[0] - C[1], C, 2 * C[-1] - C[-2]])
-    out = []
-    for u in np.linspace(0, len(C) - 1, n):
-        i = min(int(u), len(C) - 2)
-        f = u - i
-        p0, p1, p2, p3 = P[i], P[i + 1], P[i + 2], P[i + 3]
-        out.append(0.5 * ((2 * p1) + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f * f + (-p0 + 3 * p1 - 3 * p2 + p3) * f ** 3))
-    return np.array(out)
+def hero_origin():
+    """World position of the hero block's first tile centre (the top plate's top is z = 0)."""
+    x0 = -BX * BW / 2 + HERO[0] * BW + 0.1 + P / 2
+    y0 = -BY * BD / 2 + HERO[1] * BD + 0.1 + P / 2
+    return np.array([x0, y0, 0.0])
 
 
-def unit(v):
-    return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-9)
+def hero_centre():
+    return hero_origin() + np.array([(COLS - 1) * P / 2, (ROWS - 1) * P / 2, 0])
 
 
-def tube(P, R, ring=10):
-    P, R = np.asarray(P, float), np.asarray(R, float)
-    n = len(P)
-    T = unit(np.gradient(P, axis=0))
-    a = np.array([0, 0, 1.0]) if abs(T[0, 2]) < 0.9 else np.array([1.0, 0, 0])
-    N = unit(np.cross(T[0], a))
-    Ns = []
-    for i in range(n):
-        N = unit(N - T[i] * np.dot(N, T[i]))
-        Ns.append(N)
-    Ns = np.array(Ns)
-    B = np.cross(T, Ns)
-    th = np.linspace(0, 2 * np.pi, ring, endpoint=False)
-    V = P[:, None] + R[:, None, None] * (np.cos(th)[None, :, None] * Ns[:, None] + np.sin(th)[None, :, None] * B[:, None])
-    F = [[i * ring + j, i * ring + (j + 1) % ring, (i + 1) * ring + (j + 1) % ring, (i + 1) * ring + j] for i in range(n - 1) for j in range(ring)]
-    F.append(list(range((n - 1) * ring, n * ring)))
-    return V.reshape(-1, 3), F
+def tiles(trits):
+    o = hero_origin()
+    c = np.array([[o[0] + (k % COLS) * P, o[1] + (k // COLS) * P, 0.0] for k in range(BLOCK)])
+    top = np.where(trits > 0, 0.07, np.where(trits < 0, -0.05, 0.012))
+    bot = -0.07
+    c[:, 2] = (top + bot) / 2
+    s = np.stack([np.full(BLOCK, 0.084), np.full(BLOCK, 0.084), top - bot], 1)
+    return c, s
 
 
-LEAF_F = np.array([[0, 2, 4], [0, 4, 3], [0, 3, 5], [0, 5, 2], [1, 4, 2], [1, 3, 4], [1, 5, 3], [1, 2, 5]])
-
-
-def leaves(p, d, n, L, W):
-    """Needle leaves (6 verts each): base p, direction d, face normal n, length L, width W."""
-    u = unit(np.cross(n, d))
-    m = p + 0.42 * L[:, None] * d
-    V = np.stack([p, p + L[:, None] * d, m + 0.5 * W[:, None] * u, m - 0.5 * W[:, None] * u,
-                  m + 0.18 * W[:, None] * n, m - 0.18 * W[:, None] * n], 1)
-    return V
-
-
-class Mesh:
-    def __init__(self):
-        self.V, self.F, self.n = [], [], 0
-
-    def add(self, V, F):
-        V = np.asarray(V, float).reshape(-1, 3)
-        self.V.append(V)
-        self.F += (np.asarray(F) + self.n).tolist() if isinstance(F, np.ndarray) else [[x + self.n for x in f] for f in F]
-        self.n += len(V)
-
-    def make(self, name, mat, smooth=False):
-        return kit.mesh_object(name, np.vstack(self.V), self.F, mat, smooth)
-
-
-def twig(rng, start, d, length, trits=None):
-    """One block: a twig with 128 leaf places. Returns (stem verts/faces, leaf verts (128,6,3), trits, curve, normals)."""
-    u = (np.arange(BLOCK) + 0.5) / BLOCK
-    bend = rng.uniform(-0.12, 0.12)
-    side = unit(np.cross(d, [0, 0, 1.0]))
-    C = start[None] + length * (u[:, None] * d[None] + (0.10 * u * (1 - u))[:, None] * np.array([0, 0, 1.0]) + (bend * u * u)[:, None] * side)
-    T = unit(np.gradient(C, axis=0))
-    N = unit(np.array([0, 0, 1.0]) - T * T[:, 2:3])
-    B = np.cross(T, N)
-    s = np.where(np.arange(BLOCK) % 2 == 0, 1.0, -1.0)
-    if trits is None:
-        trits = rng.integers(0, 3, BLOCK) - 1          # uniform over -1, 0, +1, as in the file
-    fw, tilt = math.radians(50), np.radians(38) * trits
-    dd = math.cos(fw) * T + math.sin(fw) * s[:, None] * B
-    dl = np.cos(tilt)[:, None] * dd + np.sin(tilt)[:, None] * N
-    nl = unit(np.cross(dl, T)) * s[:, None]
-    L = np.where(trits == 0, 0.035, 0.24) * length * rng.uniform(0.9, 1.1, BLOCK)
-    W = np.where(trits == 0, 0.016, 0.028) * length * np.ones(BLOCK)
-    Lv = leaves(C, dl, nl, L, W)
-    sv, sf = tube(C[::8].tolist() + [C[-1]], np.linspace(0.016, 0.006, len(C[::8]) + 1) * length, 6)
-    return sv, sf, Lv, trits, C, N
-
-
-def build_tree(rng):
-    """The tree, in world coordinates around the origin. Pot top at z = 0.24."""
-    tr = {}
-    Ct = [(0, 0, 0.18), (0.13, 0.03, 0.55), (-0.13, -0.02, 1.0), (0.07, 0.03, 1.42), (-0.03, 0.0, 1.8), (0.02, 0, 2.08)]
-    P = spline(Ct, 70)
-    s = np.linspace(0, 1, len(P))
-    R = 0.13 * (1 - s) ** 1.15 + 0.016 + 0.09 * np.clip(1 - s / 0.07, 0, 1) ** 2
-    tr["trunk"] = tube(P, R, 16)
-    tr["trunk_at"] = lambda f: P[min(len(P) - 1, int(f * (len(P) - 1)))]
-    tr["branches"], tr["pads"] = [], []
-    for i in range(LAYERS):
-        f = i / (LAYERS - 1)
-        base = tr["trunk_at"](0.26 + 0.70 * f)
-        a = i * 2.39996 + 0.9
-        h = np.array([math.cos(a), math.sin(a), 0.0])
-        L = (0.74 - 0.58 * f ** 0.85) * rng.uniform(0.88, 1.1)
-        rise = rng.uniform(0.10, 0.28)
-        C = [base, base + 0.34 * L * h + [0, 0, 0.05 * L], base + 0.68 * L * h + [0, 0, rise * 0.4 * L], base + L * h + [0, 0, rise * L]]
-        Pb = spline(C, 14)
-        Rb = np.linspace(0.034 - 0.018 * f, 0.008, len(Pb))
-        tr["branches"].append(tube(Pb, Rb, 8))
-        E = Pb[-1]
-        rp = 0.34 - 0.19 * f
-        tw = []
-        for j in range(TWIGS):
-            phi = a + (j / (TWIGS - 1) - 0.5) * 2.7 + rng.uniform(-0.12, 0.12)
-            d = unit(np.array([math.cos(phi), math.sin(phi), rng.uniform(0.04, 0.22)]))
-            st = E - 0.03 * h + [0, 0, rng.uniform(-0.03, 0.03)]
-            ln = rp * rng.uniform(0.85, 1.12) * (1 - 0.18 * abs(j / (TWIGS - 1) - 0.5) * 2)
-            tw.append((st, d, ln))
-        tr["pads"].append({"E": E, "h": h, "a": a, "rp": rp, "twigs": tw, "attn": (i + 1) % 4 == 0})
-    return tr
-
-
-def pick_hero(tr):
-    """A low branch facing the camera (-y); its twig that runs most across the view."""
-    best = min(range(3, 16), key=lambda i: tr["pads"][i]["E"][1] + 0.4 * abs(tr["pads"][i]["E"][0]))
-    pad = tr["pads"][best]
-    j = min(range(TWIGS), key=lambda j: abs(pad["twigs"][j][1][1]) - 0.3 * pad["twigs"][j][1][0])
-    return best, j
-
-
-SPH_V, SPH_F = None, None
-
-
-def sphere(seg=10, rings=6):
-    V = [(0, 0, -1.0)]
-    for r in range(1, rings):
-        ph = -math.pi / 2 + math.pi * r / rings
-        for k in range(seg):
-            th = 2 * math.pi * k / seg
-            V.append((math.cos(ph) * math.cos(th), math.cos(ph) * math.sin(th), math.sin(ph)))
-    V.append((0, 0, 1.0))
-    F = []
-    top = len(V) - 1
-    for k in range(seg):
-        F.append([0, 1 + (k + 1) % seg, 1 + k])
-    for r in range(rings - 2):
-        for k in range(seg):
-            a, b = 1 + r * seg + k, 1 + r * seg + (k + 1) % seg
-            F.append([a, b, b + seg, a + seg])
-    for k in range(seg):
-        a, b = 1 + (rings - 2) * seg + k, 1 + (rings - 2) * seg + (k + 1) % seg
-        F.append([a, b, top])
-    return np.array(V) * [1, 1, 0.8], F
-
-
-class Inst:
-    """n copies of a small mesh, moved every frame; unused copies collapse out of view."""
-
-    def __init__(self, name, bv, bf, n, mat, smooth=True):
-        self.bv, self.n, self.nb = np.asarray(bv, float), n, len(bv)
-        F = [[x + c * self.nb for x in f] for c in range(n) for f in bf]
-        self.o = kit.mesh_object(name, np.zeros((n * self.nb, 3)), F, mat, smooth)
-
-    def set(self, c, s):
-        V = np.full((self.n, self.nb, 3), -400.0)
-        c = np.asarray(c, float).reshape(-1, 3)
-        s = np.broadcast_to(np.asarray(s, float), (len(c),))
-        k = min(len(c), self.n)
-        if k:
-            V[:k] = self.bv[None] * s[:k, None, None] + c[:k, None]
-        self.o.data.vertices.foreach_set("co", V.astype("f4").ravel())
-        self.o.data.update()
+def page_layout(n, seed=7):
+    """Token tiles in reading order on a page: (x0, width, row) per token."""
+    rng = np.random.default_rng(seed)
+    w = rng.choice([0.07, 0.1, 0.13, 0.16, 0.2, 0.26, 0.32], n, p=[.1, .2, .22, .18, .15, .1, .05])
+    out, x, row = [], 0.0, 0
+    for k in range(n):
+        if x + w[k] > PAGE_W:
+            x, row = 0.0, row + 1
+        out.append((x, w[k], row))
+        x += w[k] + 0.05
+    return out
 
 
 def build(assets, data):
-    import bpy
-    sc = kit.stage()
-    S.update(sc=sc, cam=sc.camera, data=data)
-    rng = np.random.default_rng(27)
-    clay, blue = kit.clay("clay", rough=0.62), kit.flat("blue", kit.BLUE, 1.0)
-    cclay = kit.clay("cclay", rough=0.62, clip=True)     # the crown is cut open in front of the twig
-    S["blue"], S["cclay"] = blue, cclay
-    grey_flash = kit.flat("greyflash", (0.42, 0.44, 0.47, 1), 1.0)
-    tr = build_tree(rng)
-    hero, hj = pick_hero(tr)
-    S["hero"] = hero
+    sc = kit.stage(1080, 1080, 64)
+    cam = sc.camera
+    cam.data.lens = 50
+    S["cam"] = cam
+    rng = np.random.default_rng(3)
+    clay = kit.clay("clay", rough=0.55)
+    blue = kit.flat("blue", kit.BLUE, 1.0)
+    S["trits"] = trits = rng.integers(0, 3, BLOCK) - 1
 
-    def obj(name, mesh, color, smooth=False, mat=clay):
-        if isinstance(mesh, Mesh):
-            o = mesh.make(name, mat, smooth)
-        else:
-            o = kit.mesh_object(name, mesh[0], mesh[1], mat, smooth)
-        o.color = color
+    def box(name, c, s, mat, shade):
+        v, f = kit.boxes_mesh(c, s)
+        o = kit.mesh_object(name, v, f.tolist(), mat)
+        o.color = (shade, shade, shade, 1)
         return o
-    BARK, LEAF, LEAF_A, POT = (.115, .112, .108, 1), (.19, .195, .20, 1), (.25, .255, .26, 1), (.06, .061, .064, 1)
-    tree = {"trunk": obj("trunk", tr["trunk"], BARK, True), "branch": [], "pad": [], "blue": []}
-    # the pot: a shallow tapered tray with a lip and feet, and dark soil
-    pm = Mesh()
 
-    def tray(x0, x1, y0, y1, z0, z1, k):
-        V = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0), (x0 - k, y0 - k, z1), (x1 + k, y0 - k, z1), (x1 + k, y1 + k, z1), (x0 - k, y1 + k, z1)]
-        pm.add(V, [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]])
-    tray(-0.70, 0.70, -0.42, 0.42, 0.03, 0.21, 0.04)
-    tray(-0.76, 0.76, -0.48, 0.48, 0.21, 0.245, 0.0)
-    for fx in (-0.55, 0.55):
-        for fy in (-0.30, 0.30):
-            tray(fx - 0.07, fx + 0.07, fy - 0.05, fy + 0.05, -0.01, 0.035, 0.0)
-    tree["pot"] = obj("pot", pm, POT)
-    sm = Mesh()
-    sm.add([(-0.72, -0.44, 0.235), (0.72, -0.44, 0.235), (0.72, 0.44, 0.235), (-0.72, 0.44, 0.235)], [[0, 1, 2, 3]])
-    tree["soil"] = obj("soil", sm, (.03, .03, .03, 1))
-    slots = []
-    for i, (bv, pad) in enumerate(zip(tr["branches"], tr["pads"])):
-        tree["branch"].append(obj(f"br{i}", bv, BARK, True, clay if i == hero else cclay))
-        m = Mesh()
-        for j, (st, d, ln) in enumerate(pad["twigs"]):
-            sv, sf, Lv, trits, C, N = twig(rng, st, d, ln)
-            if i == hero and j == hj:
-                S["hero_twig"] = (sv, sf, Lv, trits, C, N, ln)
-                continue
-            m.add(sv, sf)
-            m.add(Lv.reshape(-1, 3), (LEAF_F[None] + 6 * np.arange(BLOCK)[:, None, None]).reshape(-1, 3))
-            for _ in range(4):
-                k = int(rng.integers(30, BLOCK))
-                slots.append(C[k] + N[k] * 0.022 * ln / 0.25 + unit(np.cross(d, [0, 0, 1.0])) * rng.uniform(-0.05, 0.05) * ln)
-        tree["pad"].append(obj(f"pad{i}", m, LEAF_A if pad["attn"] else LEAF, mat=cclay))
-    sv, sf, Lv, trits, C, N, ln = S["hero_twig"]
-    hm = Mesh()
-    hm.add(sv, sf)
-    hm.add(Lv.reshape(-1, 3), (LEAF_F[None] + 6 * np.arange(BLOCK)[:, None, None]).reshape(-1, 3))
-    tree["hero_static"] = obj("hero_static", hm, LEAF)
-    # blue copies (same mesh, the accent material) for a layer being read
-    for i in range(LAYERS):
-        group = [tree["branch"][i], tree["pad"][i]] + ([tree["hero_static"]] if i == hero else [])
-        cp = []
-        for o in group:
-            c = o.copy()
-            sc.collection.objects.link(c)
-            c.material_slots[0].link = "OBJECT"
-            c.material_slots[0].material = blue
-            c.color = (1, 1, 1, 1)
-            c.hide_render = True
-            cp.append(c)
-        tree["blue"].append(cp)
-    S["tree"] = tree
-    S["base_col"] = [(o, tuple(o.color)) for o in [tree["trunk"], tree["pot"]] + tree["branch"] + tree["pad"]]
-    # the hero twig, rebuilt every frame while it is read: grey and blue halves
-    S["hstem"] = kit.mesh_object("hstem", sv, sf, clay)
-    S["hstem"].color = LEAF
-    S["hstem_b"] = kit.mesh_object("hstemb", sv, sf, blue)
-    S["hleaf"] = kit.mesh_object("hleaf", Lv.reshape(-1, 3), (LEAF_F[None] + 6 * np.arange(BLOCK)[:, None, None]).reshape(-1, 3).tolist(), clay)
-    S["hleaf"].color = LEAF
-    S["hleaf_b"] = kit.mesh_object("hleafb", Lv.reshape(-1, 3), (LEAF_F[None] + 6 * np.arange(BLOCK)[:, None, None]).reshape(-1, 3).tolist(), blue)
-    S["Lv"] = Lv
-    # the four buds at the twig's tip: one token and three drafts
-    T = unit(C[-1] - C[-12])
-    side = unit(np.cross(T, [0, 0, 1.0]))
-    S["bud_pos"] = [C[-1] + T * 0.02 * ln / 0.3 + N[-1] * 0.012] + [C[-1 - 12 * k] + N[-1 - 12 * k] * 0.035 * ln / 0.3 + side * (0.035 if k % 2 else -0.035) * ln / 0.3 for k in range(1, 4)]
-    S["bud_r"] = 0.016 * ln / 0.3
-    S["H"] = C[BLOCK // 2]
-    S["Hd"] = unit(C[-1] - C[0])
-    S["Hn"] = N[BLOCK // 2]
-    sv_, sf_ = sphere()
-    bv_, bf_ = sphere(20, 12)
-    S["buds_b"] = Inst("budsb", bv_, bf_, 4, blue)
-    S["buds_w"] = Inst("budsw", bv_, bf_, 4, clay)
-    S["buds_w"].o.color = (.70, .71, .72, 1)
-    S["buds_x"] = Inst("budsx", bv_, bf_, 1, clay)
-    S["buds_x"].o.color = (.05, .05, .052, 1)
-    # blossoms: the tokens. One random order of places, shared by every crown, so the fork's set is a subset of ours
-    slots = np.array(slots)
-    order = rng.permutation(len(slots))[:SLOTS]
-    S["slots"] = slots[order]
-    S["bl_w"] = Inst("blw", sv_, sf_, 60, cclay)
-    S["bl_b"] = Inst("blb", sv_, sf_, 8, blue)
-    S["bl_w"].o.color = (.70, .71, .72, 1)
-    # the race: two copies of the tree
-    S["race"] = []
-    for side_, x in (("fork", -RACE_X), ("ours", RACE_X)):
-        objs = []
-        for o in [tree["trunk"], tree["pot"], tree["soil"], tree["hero_static"]] + tree["branch"] + tree["pad"]:
-            c = o.copy()
-            sc.collection.objects.link(c)
-            c.location = (x, 0, 0)
-            objs.append(c)
-        w = Inst(f"{side_}w", sv_, sf_, SLOTS, clay)
-        w.o.color = (.70, .71, .72, 1)
-        f = Inst(f"{side_}f", sv_, sf_, 460, blue if side_ == "ours" else grey_flash)
-        S["race"].append({"x": x, "objs": objs, "w": w, "f": f})
-    # light: rims from behind, a little from the top, almost nothing in front
-    S["L"] = {
-        "back": kit.area("back", (-3.2, 3.6, 3.4), (0, 0, 1.1), 2.2, 0, 2.2),
-        "rim": kit.area("rim", (3.4, 3.0, 1.6), (0, 0, 1.0), 1.6, 0, 2.4),
-        "top": kit.area("top", (0.4, 0.9, 5.2), (0, 0, 1.0), 2.4, 0),
-        "fill": kit.area("fill", (2.0, -6.5, 2.2), (0, 0, 1.0), 5, 0),
-        "in": kit.area("in", (0, 0, 0), (0, 0, 0), 0.4, 0),
-        "inf": kit.area("inf", (0, 0, 0), (0, 0, 0), 0.6, 0),
-        "rback": kit.area("rback", (0, 4.2, 4.2), (0, 0, 1.1), 5.5, 0, 2.5),
-        "rl": kit.area("rl", (-5.2, 2.6, 2.0), (-1.4, 0, 1.0), 2.0, 0, 2.4),
-        "rr": kit.area("rr", (5.2, 2.6, 2.0), (1.4, 0, 1.0), 2.0, 0, 2.4),
-        "rtop": kit.area("rtop", (0, 0.6, 5.8), (0, 0, 1.0), 4.5, 0),
-        "rfill": kit.area("rfill", (0.5, -7.5, 2.6), (0, 0, 1.0), 7, 0),
-    }
-    H, Hd, Hn = Vector(S["H"]), Vector(S["Hd"]), Vector(S["Hn"])
-    out = Hd.cross(Vector((0, 0, 1))).normalized()
-    if out.y > 0:
-        out = -out
-    S["out"] = out
-    kit.look(S["L"]["in"], H - out * 0.9 + Vector((0, 0, 0.55)), H)
-    kit.look(S["L"]["inf"], H + out * 1.2 + Vector((0.3, 0, 0.5)), H)
+    # the hero block's tiles, one object per trit value, and a blue copy that shows what the read has touched
+    c, s = tiles(trits)
+    for val, shade in ((1, 0.62), (0, 0.10), (-1, 0.26)):
+        m = trits == val
+        box(f"t{val}", c[m], s[m], clay, shade)
+    S["tc"], S["ts"] = c, s
+    S["lit"] = kit.Boxes("lit", BLOCK, blue)
+    S["bar"] = kit.Boxes("bar", 1, blue)
+    # the block's tray, and the four tokens it feeds
+    hc = hero_centre()
+    box("tray", [hc + np.array([0, 0, -0.1])], [[COLS * P + 0.06, ROWS * P + 0.06, 0.06]], clay, 0.05)
+    S["tok_c"] = [hc + np.array([COLS * P / 2 + 0.75, (k - 1.5) * 0.24, 0.02]) for k in range(4)]
+    S["tok_grey"] = kit.Boxes("tokg", 4, clay)
+    S["tok_grey"].o.color = (0.22, 0.22, 0.22, 1)
+    S["tok_blue"] = kit.Boxes("tokb", 4, blue)
+    S["beams"] = kit.Boxes("beams", 4, blue)
+
+    # 64 layer plates of block slabs; the top plate leaves a hole for the hero block
+    S["plates"], S["plates_b"] = [], []
+    for L in range(LAYERS):
+        z = -L * GAP
+        cs, ss = [], []
+        for i in range(BX):
+            for j in range(BY):
+                if L == 0 and (i, j) == HERO:
+                    continue
+                cs.append([-BX * BW / 2 + (i + 0.5) * BW, -BY * BD / 2 + (j + 0.5) * BD, z - 0.05])
+                ss.append([BW - 0.14, BD - 0.14, 0.08])
+        sh = 0.13 if L % 4 == 3 else 0.085          # every 4th layer is attention
+        S["plates"].append(box(f"p{L}", cs, ss, clay, sh))
+        b = box(f"pb{L}", cs, [[a, b_, 0.085] for a, b_, _ in ss], blue, 1.0)
+        b.hide_render = True
+        S["plates_b"].append(b)
+
+    # the race: two pages, the same token sequence on each
+    fork, ours = rate(data)
+    n = int(ours * RACE_LEN) + 2
+    S["layout"] = page_layout(n)
+    S["pages"] = {}
+    for key, x in (("fork", -PAGE_W / 2 - PAGE_GAP / 2), ("ours", PAGE_W / 2 + PAGE_GAP / 2)):
+        ox = RACE_X + x - PAGE_W / 2
+        S["pages"][key] = {"ox": ox, "grey": kit.Boxes(f"{key}g", n, clay), "blue": kit.Boxes(f"{key}b", n, blue),
+                           "rate": ours if key == "ours" else fork}
+        S["pages"][key]["grey"].o.color = (0.55, 0.57, 0.6, 1)
+        box(f"{key}panel", [[RACE_X + x, 0.25, 4.0]], [[PAGE_W + 0.6, 0.05, 10.6]], clay, 0.035)
+
+    # light: suns, so the tower and the close-up are lit the same at any distance
+    for name, rot, e in (("key", (math.radians(50), 0, math.radians(-38)), 1.4), ("rim", (math.radians(66), 0, math.radians(150)), 1.0),
+                         ("fill", (math.radians(75), 0, math.radians(60)), 0.18)):
+        L = bpy.data.lights.new(name, "SUN")
+        L.energy, L.angle = e, math.radians(6)
+        o = bpy.data.objects.new(name, L)
+        sc.collection.objects.link(o)
+        o.rotation_euler = rot
     return sc
 
 
-def hpath(t, keys):
-    """Camera path through keys [(time, point)], Hermite with each key's velocity taken from the slower of its two
-    segments, so a fast move into a slow drift arrives without overshooting."""
-    ts = [k[0] for k in keys]
-    ps = [np.array(k[1], float) for k in keys]
-    if t <= ts[0]:
-        return Vector(ps[0])
-    if t >= ts[-1]:
-        return Vector(ps[-1])
-    sl = [(ps[i + 1] - ps[i]) / (ts[i + 1] - ts[i]) for i in range(len(ps) - 1)]
-    v = [sl[0]] + [min(sl[i - 1], sl[i], key=np.linalg.norm) for i in range(1, len(ps) - 1)] + [sl[-1]]
-    i = max(j for j in range(len(ts) - 1) if ts[j] <= t)
-    h = ts[i + 1] - ts[i]
-    u = (t - ts[i]) / h
-    u2, u3 = u * u, u * u * u
-    return Vector((2 * u3 - 3 * u2 + 1) * ps[i] + (u3 - 2 * u2 + u) * h * v[i] + (-2 * u3 + 3 * u2) * ps[i + 1] + (u3 - u2) * h * v[i + 1])
-
-
-def show(o, on):
-    o.hide_render = not on
-
-
-def blossoms(t):
-    """Blossoms on the first tree: (count, newest-first ages)."""
-    times = [-1.0 + 0.35 * k for k in range(4)] + [0.18 + 0.27 * k for k in range(16)]
-    for p in PASSES:
-        times += [p + PASS + 0.02 * k for k in range(DRAFTS)]
-    return [t - x for x in times if x <= t]
-
-
 def frame(t):
-    import bpy  # noqa: F401
-    cam, L, tree = S["cam"], S["L"], S["tree"]
-    anchors = {}
-    race = t >= CUT
-    for k in L:
-        L[k].data.energy = 0
-    S["cclay"].node_tree.nodes["CLIP"].outputs[0].default_value = -99
-    main = [tree["trunk"], tree["pot"], tree["soil"], tree["hero_static"]] + tree["branch"] + tree["pad"]
-    for o in main:
-        show(o, not race)
-    for cp in tree["blue"]:
-        for o in cp:
-            show(o, False)
-    for r in S["race"]:
-        for o in r["objs"]:
-            show(o, race)
-        show(r["w"].o, race)
-        show(r["f"].o, race)
-    for k in ("hstem", "hstem_b", "hleaf", "hleaf_b"):
-        show(S[k], False)
-    for k in ("buds_b", "buds_w", "buds_x", "bl_w", "bl_b"):
-        show(S[k].o, not race)
-    inside = 4.4 < t < 11.6
-    H, out = Vector(S["H"]), S["out"]
-    if not race:
-        # blossoms on the one tree
-        ages = blossoms(t)
-        sl = S["slots"]
-        w = [(sl[k], 0.034 * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a >= 0.30]
-        b = [(sl[k], 0.034 * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a < 0.30]
-        S["bl_w"].set([x[0] for x in w], [x[1] for x in w])
-        S["bl_b"].set([x[0] for x in b], [x[1] for x in b])
-        # the twig being read
-        if inside:
-            show(tree["hero_static"], False)
-            u = kit.clamp((t - SWEEP0) / (SWEEP1 - SWEEP0))
-            n = int(round(u * BLOCK)) if t < BUDS + 0.05 and t >= SWEEP0 else 0
-            Lv = S["Lv"]
-            far = np.full_like(Lv, -400.0)
-            lit = np.arange(BLOCK) < n
-            S["hleaf"].data.vertices.foreach_set("co", np.where(lit[:, None, None], far, Lv).astype("f4").ravel())
-            S["hleaf_b"].data.vertices.foreach_set("co", np.where(lit[:, None, None], Lv, far).astype("f4").ravel())
-            S["hleaf"].data.update()
-            S["hleaf_b"].data.update()
-            show(S["hleaf"], n < BLOCK)
-            show(S["hleaf_b"], n > 0)
-            stem_lit = SWEEP0 <= t < BUDS + 0.05
-            show(S["hstem"], not stem_lit)
-            show(S["hstem_b"], stem_lit)
-            # buds: open together, then the last draft is pruned and drops; the rest stay
-            g = kit.ease((t - BUDS) / 0.35)
-            bp, r = S["bud_pos"], S["bud_r"]
-            if t < PRUNE:
-                S["buds_b"].set(bp, [r * g] * 4)
-                S["buds_w"].set([], [])
-                S["buds_x"].set([], [])
-            else:
-                S["buds_b"].set([], [])
-                S["buds_w"].set(bp[:3], [r] * 3)
-                fall = t - PRUNE - 0.25
-                p = np.array(bp[3]) - [0, 0, 0.5 * 9.8 * 0.05 * max(0.0, fall) ** 2]
-                S["buds_x"].set([p], [r * (1 - kit.ramp(t, PRUNE + 0.3, 1.0))])
-        else:
-            for k in ("buds_b", "buds_w", "buds_x"):
-                S[k].set([], [])
-            if t >= PRUNE:
-                S["buds_w"].set(S["bud_pos"][:3], [S["bud_r"]] * 3)
-        # a step climbs the layers
-        for p in PASSES:
-            u = (t - p) / PASS
-            if 0 <= u < 1.05:
-                head = u * (LAYERS + 6)
-                for i in range(LAYERS):
-                    on = 0 <= head - i < 6
-                    if on:
-                        show(tree["branch"][i], False)
-                        show(tree["pad"][i], False)
-                        if i == S["hero"]:
-                            show(tree["hero_static"], False)
-                        for o in tree["blue"][i]:
-                            show(o, True)
-        # light
-        cut = kit.ramp(t, 4.5, 1.6) * (1 - kit.ramp(t, 10.3, 1.1))
-        S["cclay"].node_tree.nodes["CLIP"].outputs[0].default_value = kit.lerp(-1.7, S["H"][1] - 0.03, cut) if cut > 0 else -99
-        for o, c in S["base_col"]:          # while the twig is read, the idle tree goes dark
-            o.color = tuple(x * (1 - 0.72 * cut) for x in c[:3]) + (1,)
-        near = 1 - kit.ramp(t, 4.6, 1.4) + kit.ramp(t, 10.2, 1.4)
-        near = kit.clamp(near)
-        cl = 1 - near
-        L["back"].data.energy, L["rim"].data.energy, L["top"].data.energy, L["fill"].data.energy = 520 * near, 300 * near, 150 * near, 18 * near
-        L["in"].data.energy, L["inf"].data.energy = 34 * cl, 5 * cl
-        # camera
-        cin = H + out * 0.78 + Vector((0, 0, 0.20))
-        cin2 = H + out * 0.66 + Vector(S["Hd"]) * 0.05 + Vector((0, 0, 0.16))
-        keys = [(0, (1.6, -6.6, 1.55)), (4.0, (1.05, -5.75, 1.38)), (6.4, tuple(cin)), (10.2, tuple(cin2)), (12.4, (1.9, -5.5, 1.5)), (CUT, (2.5, -6.2, 1.35))]
-        ats = [(0, (-0.55, 0, 1.08)), (4.0, (-0.47, 0, 1.03)), (6.4, tuple(H - Vector((0, 0, 0.03)))), (10.2, tuple(H + Vector(S["Hd"]) * 0.04 - Vector((0, 0, 0.03)))), (12.4, (-0.42, 0, 1.12)), (CUT, (-0.5, 0, 1.16))]
-        kit.look(cam, hpath(t, keys), hpath(t, ats))
-        cam.data.lens = 50
-        cam.data.clip_start = 0.01
+    cam = S["cam"]
+    hc = Vector(hero_centre())
+    tc, ts = S["tc"], S["ts"]
+    # the read: a bar crosses the block; tiles it has just passed show blue
+    u = kit.clamp((t - SWEEP0) / (SWEEP1 - SWEEP0))
+    x0, x1 = tc[0, 0] - 0.08, tc[-1, 0] + 0.08
+    bx = kit.lerp(x0, x1, kit.ease(u))
+    if SWEEP0 <= t <= SWEEP1 + 0.1:
+        S["bar"].set([[bx, hc.y, 0.09]], [[0.018, ROWS * P + 0.12, 0.012]])
+        near = (tc[:, 0] < bx + 0.01) & (tc[:, 0] > bx - 0.3)
+        top = tc[near] + np.stack([np.zeros(near.sum()), np.zeros(near.sum()), ts[near, 2] / 2 + 0.004], 1)
+        S["lit"].set(top, np.tile([0.088, 0.088, 0.01], (near.sum(), 1)))
     else:
-        fork, ours = rate(S["data"])
+        S["bar"].set([], [])
+        S["lit"].set([], [])
+    # four tokens: grey until the read ends, then lit together; beams from the block's edge
+    g = kit.ease((t - 3.0) / 0.5) * (1 - kit.ramp(t, PULL1 - 0.6, 0.6))
+    on = LIGHT <= t < PULL1 - 0.3
+    tok = [list(c) for c in S["tok_c"]]
+    sz = [[0.16 * g, 0.16 * g, 0.16 * g]] * 4
+    S["tok_grey"].set([] if on else tok, [] if on else sz)
+    S["tok_blue"].set(tok if on else [], sz if on else [])
+    bk = kit.ease((t - LIGHT + 0.05) / 0.25) * (1 - kit.ramp(t, 6.3, 0.4))
+    if bk > 0.01:
+        ex = hc.x + COLS * P / 2 + 0.04
+        beams, bs = [], []
+        for c in S["tok_c"]:
+            L_ = (c[0] - 0.08 - ex) * bk
+            beams.append([ex + L_ / 2, c[1], 0.02])
+            bs.append([L_, 0.012, 0.012])
+        S["beams"].set(beams, bs)
+    else:
+        S["beams"].set([], [])
+    # every step reads all 64 layers, top to bottom
+    lit = set()
+    for p0 in PASSES:
+        if p0 <= t < p0 + PASS + 0.12:
+            k = (t - p0) / PASS * LAYERS
+            lit |= {L for L in range(LAYERS) if k - 6 <= L <= k}
+    for L, b in enumerate(S["plates_b"]):
+        b.hide_render = L not in lit
+    # the race
+    for key, pg in S["pages"].items():
         el = kit.clamp(t - RACE0, 0, RACE_LEN)
-        sl = S["slots"]
-        for r, tps in zip(S["race"], (fork, ours)):
-            n = int(tps * el)
-            off = np.array([r["x"], 0, 0])
-            # each token's blossom: when it was made, at the measured average rate
-            k = np.arange(n)
-            age = el - k / tps if n else np.zeros(0)
-            if t > RACE0 + RACE_LEN:
-                age = age + (t - RACE0 - RACE_LEN)
-            pop = np.clip(age / 0.10, 0, 1)
-            sz = 0.020 * pop * pop * (3 - 2 * pop)
-            fresh = age < 0.22
-            if r["x"] > 0 and t > END + 0.6:     # the result: what ours made beyond the fork's count, in the accent
-                fresh = fresh | (k >= int(fork * RACE_LEN))
-            r["w"].set(sl[k[~fresh]] + off, sz[~fresh])
-            r["f"].set(sl[k[fresh]] + off, sz[fresh])
-            anchors["fork" if r["x"] < 0 else "ours"] = (r["x"], 0, 2.55)
-        on = kit.ramp(t, CUT, 0.3)
-        L["rback"].data.energy, L["rl"].data.energy, L["rr"].data.energy = 900 * on, 260 * on, 260 * on
-        L["rtop"].data.energy, L["rfill"].data.energy = 380 * on, 60 * on
-        loc = kit.path(t, [(CUT, (-0.4, -7.6, 2.2)), (END, (0.1, -7.0, 2.0)), (DURATION, (0.25, -6.7, 2.25))])
-        at = kit.path(t, [(CUT, (0, 0, 1.12)), (END, (0, 0, 1.12)), (DURATION, (0.05, 0, 1.02))])
-        kit.look(cam, loc, at)
-        cam.data.lens = 34
-    return anchors
+        n = int(pg["rate"] * el) if t >= CUT else 0
+        cg, sg, cb, sb = [], [], [], []
+        for k, (x, w, row) in enumerate(S["layout"][:n]):
+            c = [pg["ox"] + x + w / 2, 0.2, 9.0 - row * LINE_H]
+            s = [w, 0.04, TILE_H]
+            if el - k / pg["rate"] < 0.22 and el < RACE_LEN:
+                cb.append(c), sb.append(s)
+            else:
+                cg.append(c), sg.append(s)
+        pg["grey"].set(cg, sg)
+        pg["blue"].set(cb, sb)
+    # camera
+    if t < CUT:
+        keys = [(0.0, hc + Vector((-0.95, -1.75, 1.55))), (3.3, hc + Vector((-0.1, -2.5, 1.8))), (6.2, hc + Vector((0.5, -3.15, 2.25))),
+                (PULL0, hc + Vector((0.55, -3.25, 2.35))), (8.0, Vector((-9, -17, 10))), (PULL1, Vector((-22, -31, 13))), (CUT, Vector((-24, -33, 13.5)))]
+        ats = [(0.0, hc + Vector((0, 0.05, -0.12))), (3.3, hc + Vector((0.5, 0.05, -0.15))), (6.2, hc + Vector((0.85, 0.05, -0.2))),
+               (PULL0, hc + Vector((0.85, 0.05, -0.2))), (8.0, Vector((0, 0, -5.5))), (PULL1, Vector((0, 0, -10.5))), (CUT, Vector((0, 0, -10.8)))]
+        kit.look(cam, kit.path(t, keys), kit.path(t, ats))
+    else:
+        loc = kit.path(t, [(CUT, (RACE_X - 0.5, -27.5, 4.6)), (DURATION, (RACE_X + 0.3, -26.2, 4.3))])
+        kit.look(cam, loc, Vector((RACE_X, 0, 3.7)))
+    return {"fork": (S["pages"]["fork"]["ox"] + PAGE_W / 2, 0, 9.75), "ours": (S["pages"]["ours"]["ox"] + PAGE_W / 2, 0, 9.75)}
 
 
 # --- overlay (runs after rendering, without Blender) ---
@@ -517,12 +230,14 @@ def _e(x):
     return x * x * (3 - 2 * x)
 
 
-def _fade(t, a, b, d=0.4):
+def _fade(t, a, b, d=0.35):
     return _e((t - a) / d) * (1 - _e((t - b + d) / d))
 
 
-POSTER = 20.6
-CLIPS = {"one": (0.0, 4.5, 960), "inside": (6.25, 10.35, 960), "against": (15.0, 21.3, 960)}
+CUT, RACE0, RACE_LEN = 10.6, 10.9, 4.0       # repeated: the overlay runs on its own
+POSTER = 16.4
+CLIPS = {"inside": (3.2, 6.6, 720), "layers": (6.4, 10.5, 720), "against": (10.6, 15.2, 720)}
+MUTED = "#9aa5b6"
 
 
 def overlay(t, pts, data):
@@ -530,31 +245,28 @@ def overlay(t, pts, data):
     fork, ours = d["fork_mtp"], d["ours_mtp"]
     out = []
 
-    def line(a, b, text, d_=0.4):
-        k = _fade(t, a, b, d_) if a > 0 else 1 - _e((t - b + d_) / d_)
-        out.append({"text": text, "x": 0.047, "y": 0.875, "size": 62, "a": k})
-    line(0.0, 2.4, "Ternary Bonsai 2.5, 27B.")
-    line(2.4, 4.7, "Every weight is −1, 0 or +1.")
-    line(5.9, 8.0, "128 weights, read once.")
-    line(8.0, 10.6, "One read checks four tokens.")
-    line(11.6, 14.9, "64 layers, every step.")
-    if t >= 15.0:
-        el = max(0.0, min(5.0, t - 15.7))
-        k = _e((t - 15.0) / 0.4)
-        for key, name, tps in (("fork", "PrismML llama.cpp fork", fork), ("ours", "tritrun", ours)):
+    def say(a, b, label, text):
+        k = _fade(t, a, b) if a > 0 else 1 - _e((t - b + 0.35) / 0.35)
+        out.append({"text": label, "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": k})
+        out.append({"text": text, "x": 0.06, "y": 0.88, "size": 64, "a": k})
+    say(0.0, 3.35, "EVERY WEIGHT IS −1, 0 OR +1", "27B weights in 6 GB.")
+    say(3.5, 6.5, "ONE BLOCK OF 128 WEIGHTS", "Read once, for four tokens.")
+    say(6.7, 10.45, "EVERY STEP READS ALL 64 LAYERS", "Four tokens, barely more work.")
+    if t >= CUT:
+        el = max(0.0, min(RACE_LEN, t - RACE0))
+        k = _e((t - CUT) / 0.3)
+        for key, name, tps in (("fork", "PrismML's llama.cpp fork", fork), ("ours", "tritrun", ours)):
             if key in pts:
                 x, y = pts[key]
-                n = int(tps * el)
-                ours_ = key == "ours"
-                out.append({"text": name, "x": x, "y": y - 0.03, "size": 34, "weight": "Regular", "anchor": "c", "a": k, "color": "#e8edf4" if ours_ else "#8b97a8"})
-                out.append({"text": f"{n:,} tokens", "x": x, "y": y + 0.028, "size": 56, "anchor": "c", "a": k, "tnum": True, "color": "#3b82f6" if ours_ and el > 0 else "#e8edf4" if ours_ else "#a3afc0"})
-        out.append({"text": f"{el:.2f} s", "x": 0.5, "y": 0.07, "size": 40, "anchor": "c", "a": k * (1 - _e((t - 22.0) / 0.5)), "tnum": True})
-        out.append({"text": f"One RTX 5090, MTP with 3 drafts, greedy. A blossom per token at each engine's measured rate, {fork:g} and {ours:g} tok/s, in real time.",
-                    "x": 0.5, "y": 0.962, "size": 24, "weight": "Regular", "anchor": "c", "a": k * (1 - _e((t - 21.6) / 0.4)), "color": "#8b97a8"})
-    if t >= 21.4:
-        pct = round(100 * (ours / fork - 1))
-        a = _e((t - 22.0) / 0.6)
-        out.append({"text": f"{pct}% more tokens in the same time.", "x": 0.047, "y": 0.86, "size": 62, "a": a})
-        out.append({"text": "github.com/amw720386/tritrun", "x": 0.047, "y": 0.93, "size": 30, "weight": "Regular", "a": _e((t - 23.8) / 0.6)})
-        out.append({"svg": "magni-lockup-on-dark.svg", "x": 0.885, "y": 0.92, "w": 230, "a": _e((t - 23.8) / 0.6)})
+                o = key == "ours"
+                out.append({"text": name, "x": x, "y": y - 0.05, "size": 30, "weight": "Regular", "anchor": "c", "a": k, "color": "#e8edf4" if o else "#a3afc0"})
+                out.append({"text": f"{int(tps * el):,} tokens", "x": x, "y": y - 0.005, "size": 46, "anchor": "c", "a": k, "tnum": True,
+                            "color": "#3b82f6" if o and el > 0 else "#e8edf4" if o else "#a3afc0"})
+        out.append({"text": f"{el:.2f} s", "x": 0.5, "y": 0.04, "size": 34, "anchor": "c", "a": k, "tnum": True})
+        say(CUT, 15.0, "SAME RTX 5090, SAME MODEL FILE", "Both, in real time.")
+    if t >= 15.0:
+        a = _e((t - 15.1) / 0.45)
+        out.append({"text": "TRITRUN, OPEN SOURCE", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": a})
+        out.append({"text": f"{ours / fork:.2f}× faster.", "x": 0.06, "y": 0.88, "size": 64, "a": a})
+        out.append({"text": "github.com/amw720386/tritrun", "x": 0.06, "y": 0.94, "size": 26, "weight": "Regular", "color": MUTED, "a": _e((t - 15.7) / 0.45)})
     return out

@@ -4,7 +4,7 @@
 
 # 🌳 tritrun
 
-**A Ternary Bonsai engine that's faster than PrismML's.**
+**A Ternary Bonsai engine, 1.34× faster than PrismML's.**
 
 ![model: Ternary-Bonsai-2.5-27B](https://img.shields.io/badge/model-Ternary--Bonsai--2.5--27B-6f42c1) ![format: PTQ1_0 GGUF](https://img.shields.io/badge/format-PTQ1__0%20GGUF-blue) ![GPU: T4 · L4 · A10 · RTX 5090](https://img.shields.io/badge/GPU-T4%20%C2%B7%20L4%20%C2%B7%20A10%20%C2%B7%20RTX%205090-76b900)
 
@@ -19,11 +19,11 @@ tritrun is a standalone CUDA inference engine for PrismML's
 27B model fits on a 16 GB T4. It is aimed at the small and mid-range cards where decode is limited by memory bandwidth, and it
 is compared with PrismML's own llama.cpp fork, the only other engine that runs this file on NVIDIA, at the fork's best settings.
 
-[![Launch film: a bonsai opens a blossom per token, one twig of 128 ternary leaves is read once and opens four buds, the 64 layers light in turn, and two trees race on an RTX 5090](assets/launch-poster.jpg)](assets/launch.mp4)
+[![Launch video: one block of 128 ternary weights, +1 standing, 0 flat and -1 sunk, is read once and four tokens light together; the camera pulls back to the 64 layers a step reads; then both engines decode the same text on one RTX 5090 in real time, 965 tokens against 1,294 after 4 seconds](assets/launch-poster.jpg)](assets/launch.mp4)
 
-*Launch film (27 s). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and the race runs in real time at each engine's average rate. The tree's shape, the trit values on the twig, the pace of the first three shots and which draft is rejected are illustrative. Made with [`media/film.py`](media/film.py).*
+*Launch video (17 s, with sound). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and the race runs in real time at each engine's average rate. The trit values, the token widths and the pace of the first two shots are illustrative. Made with [`media/film.py`](media/film.py).*
 
-<p align="center"><img src="assets/race.gif" width="900" alt="Two bonsai trees on an RTX 5090 open one blossom per generated token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 1,207 and 1,618 tokens after 5 seconds"></p>
+<p align="center"><img src="assets/against.gif" width="720" alt="Both engines decode the same text on one RTX 5090, a tile per token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 965 and 1,294 tokens after 4 seconds"></p>
 
 *Decode with 3 MTP drafts on an RTX 5090, in real time at each engine's measured average rate.*
 
@@ -108,7 +108,7 @@ The weights themselves do not compress further: the trits are uniformly distribu
 
 <p align="center"><img src="assets/step.svg" alt="One decode step with drafts" width="100%"></p>
 
-<p align="center"><img src="assets/inside.gif" alt="One twig of 128 ternary leaves, tilted up, tilted down or bare, is read once and opens four buds together, one token and three drafts. One draft is rejected and drops" width="900"></p>
+<p align="center"><img src="assets/inside.gif" alt="One block of 128 ternary weights, +1 standing, 0 flat and -1 sunk, is read once by a sweep, and four tokens light together: one token and three drafts" width="720"></p>
 
 <a id="accuracy"></a>
 
@@ -169,7 +169,7 @@ python -m tritrun.cli Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf "Write a haiku abou
 | `results/` | raw logs; release.json is what this page reads |
 | `tools/release_numbers.py` | raw logs to release.json |
 | `docs/` | benchmarks and validation in full |
-| `media/film.py` | the launch film |
+| `media/film.py` | the launch video |
 
 ---
 
