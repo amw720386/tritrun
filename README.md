@@ -19,9 +19,9 @@ tritrun is a standalone CUDA inference engine for PrismML's
 27B model fits on a 16 GB T4. It is aimed at the small and mid-range cards where decode is limited by memory bandwidth, and it
 is compared with PrismML's own llama.cpp fork, the only other engine that runs this file on NVIDIA, at the fork's best settings.
 
-[![Launch video: one block of 128 ternary weights, +1 standing, 0 flat and -1 sunk, is read once and four tokens light together; the camera pulls back to the 64 layers a step reads; then both engines decode the same text on one RTX 5090 in real time, 965 tokens against 1,294 after 4 seconds](assets/launch-poster.jpg)](assets/launch.mp4)
+[![Launch video: the title over a bonsai, then into one twig whose leaves become a block of 128 ternary weights, +1 standing, 0 flat and -1 sunk; the block is read once and four tokens light together; the camera pulls back to the 64 layers a step reads; both engines decode the same text on one RTX 5090 in real time, 965 tokens against 1,294 after 4 seconds; it ends on the two bonsai, a blossom per token](assets/launch-poster.jpg)](assets/launch.mp4)
 
-*Launch video (17 s, with sound). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and the race runs in real time at each engine's average rate. The trit values, the token widths and the pace of the first two shots are illustrative. Made with [`media/film.py`](media/film.py).*
+*Launch video (27 s, with sound). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and both races run in real time at each engine's average rate. The bonsai, the trit values, the token widths and the pace of the first shots are illustrative. Made with [`media/edit.py`](media/edit.py) from [`media/film_bonsai.py`](media/film_bonsai.py) and [`media/film.py`](media/film.py).*
 
 <p align="center"><img src="assets/against.gif" width="720" alt="Both engines decode the same text on one RTX 5090, a tile per token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 965 and 1,294 tokens after 4 seconds"></p>
 
@@ -169,7 +169,7 @@ python -m tritrun.cli Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf "Write a haiku abou
 | `results/` | raw logs; release.json is what this page reads |
 | `tools/release_numbers.py` | raw logs to release.json |
 | `docs/` | benchmarks and validation in full |
-| `media/film.py` | the launch video |
+| `media/` | the launch video: two Blender films, the music and the edit |
 
 ---
 

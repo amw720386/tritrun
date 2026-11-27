@@ -1,16 +1,18 @@
-"""The launch explainer, square. Rates come from results/release.json (built from the logs by tools/release_numbers.py);
+"""The explainer at the middle of the launch video, square (media/edit.py cuts it between the bonsai scenes of
+media/film_bonsai.py). Rates come from results/release.json (built from the logs by tools/release_numbers.py);
 the layer count and block size from src/engine.cu. The trits on screen are drawn uniformly, like the real ones, but are
 not the file's, and the token widths on the two pages are illustrative (both pages show the same sequence, as greedy
 decoding of one model file does).
 
     python tools/release_numbers.py
-    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080
+    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 16.2
 
  0.0  one block of 128 weights: +1 stands up, 0 lies flat, -1 sinks
  3.4  a read sweeps the block once, and four tokens light together (one token and three drafts)
  6.6  pull back: the block is one of many in a layer, and every step reads all 64 layers
 10.6  cut: the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
-15.0  hold on the two pages: the ratio
+14.9  the race ends; the counts hold
+16.2  (the video cuts back to the bonsai here)
 """
 import math
 
@@ -235,7 +237,7 @@ def _fade(t, a, b, d=0.35):
 
 
 CUT, RACE0, RACE_LEN = 10.6, 10.9, 4.0       # repeated: the overlay runs on its own
-POSTER = 16.4
+POSTER = 15.2
 CLIPS = {"inside": (3.2, 6.6, 720), "layers": (6.4, 10.5, 720), "against": (10.6, 15.2, 720)}
 MUTED = "#9aa5b6"
 
@@ -249,7 +251,7 @@ def overlay(t, pts, data):
         k = _fade(t, a, b) if a > 0 else 1 - _e((t - b + 0.35) / 0.35)
         out.append({"text": label, "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": k})
         out.append({"text": text, "x": 0.06, "y": 0.88, "size": 64, "a": k})
-    say(0.0, 3.35, "EVERY WEIGHT IS −1, 0 OR +1", "27B weights in 6 GB.")
+    say(1.0, 3.35, "EVERY WEIGHT IS −1, 0 OR +1", "27B weights in 6 GB.")
     say(3.5, 6.5, "ONE BLOCK OF 128 WEIGHTS", "Read once, for four tokens.")
     say(6.7, 10.45, "EVERY STEP READS ALL 64 LAYERS", "Four tokens, barely more work.")
     if t >= CUT:
@@ -263,10 +265,5 @@ def overlay(t, pts, data):
                 out.append({"text": f"{int(tps * el):,} tokens", "x": x, "y": y - 0.005, "size": 46, "anchor": "c", "a": k, "tnum": True,
                             "color": "#3b82f6" if o and el > 0 else "#e8edf4" if o else "#a3afc0"})
         out.append({"text": f"{el:.2f} s", "x": 0.5, "y": 0.04, "size": 34, "anchor": "c", "a": k, "tnum": True})
-        say(CUT, 15.0, "SAME RTX 5090, SAME MODEL FILE", "Both, in real time.")
-    if t >= 15.0:
-        a = _e((t - 15.1) / 0.45)
-        out.append({"text": "TRITRUN, OPEN SOURCE", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": a})
-        out.append({"text": f"{ours / fork:.2f}× faster.", "x": 0.06, "y": 0.88, "size": 64, "a": a})
-        out.append({"text": "github.com/amw720386/tritrun", "x": 0.06, "y": 0.94, "size": 26, "weight": "Regular", "color": MUTED, "a": _e((t - 15.7) / 0.45)})
+        say(CUT, 16.2, "SAME RTX 5090, SAME MODEL FILE", "Both, in real time.")
     return out
