@@ -1,16 +1,15 @@
-"""Cut the launch video from its four renders and the music bed, on Modal.
+"""Cut the launch video from its two renders and the music bed, on Modal.
 
-    modal run media/edit.py --trees <dir>/film.mp4 --opening <dir>/film.mp4 --mid <dir>/film.mp4 --music bed.wav --out <dir>
+    modal run media/edit.py --bonsai <dir>/film.mp4 --mid <dir>/film.mp4 --music bed.wav --out <dir>
 
-race  media/film_bonsai.py 15.4 to 22.0  two bonsai on one RTX 5090, a blossom per token at each engine's rate, 5 s
-open  media/film_bonsai.py  0.0 to 6.4   the title over one bonsai, and the flight into one twig
+open  media/film_bonsai.py  0.0 to 12.3  the title over one bonsai; it clones into two that slide apart, PrismML's fork
+                                         on the left and tritrun on the right, and both decode for 5 s, a blossom per token
 mid   media/film.py         0.6 to 10.5  the block read once for four tokens, and the 64 layers
-end   media/film_bonsai.py 22.0 to 26.5  back on the two crowns: tritrun's extra blossoms, the ratio and the repository
+end   media/film_bonsai.py 12.3 to 17.0  back on the two crowns: tritrun's extra blossoms, the ratio and the repository
 
-The trees' race comes first so the first five seconds show the result to anyone who scrolls past. --trees is one
-render of film_bonsai.py from 15.4 to 26.5; --opening from 0 to 6.4; --mid of film.py from 0 to 10.6. Each part joins the next
-with a 0.6 s dissolve, the first through black. The music is set to a constant gain (two-pass loudness, linear), so it never pumps, and fades
-out with the picture. The bed is ACE-Step (Apache-2.0), seed 101 of the prompt in media/music.py.
+--bonsai is one render of film_bonsai.py from 0 to 17; --mid of film.py from 0 to 10.6. Each part joins the next with a
+0.6 s dissolve, the first through black. The music is set to a constant gain (two-pass loudness, linear), so it never
+pumps, and fades out with the picture. The bed is ACE-Step (Apache-2.0), seed 101 of the prompt in media/music.py.
 """
 import io
 import json
@@ -21,11 +20,11 @@ import modal
 
 app = modal.App("launch-edit", image=modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg"))
 X = 0.6
-# (part, file, span in that file's own time); trees.mp4 starts at the film's 15.4
-PARTS = [("race", "trees", 0.0, 6.6), ("open", "open", 0.0, None), ("mid", "mid", 0.6, 10.5), ("end", "trees", 6.6, None)]
-CLIPS = {"against": ("race", 0.0, 6.6), "inside": ("mid", 3.2, 6.6), "layers": ("mid", 6.4, 10.5)}
-JOINS = ["fadeblack", "fade", "fade"]   # race to title dips through black: two small trees never ghost into one big one
-POSTER = ("end", 9.5)            # in trees.mp4 time: the crowns, the extra blossoms in blue, "1.34× faster." and the URL
+# (part, file, span in that file's own time)
+PARTS = [("open", "bonsai", 0.0, 12.3), ("mid", "mid", 0.6, 10.5), ("end", "bonsai", 12.3, None)]
+CLIPS = {"against": ("open", 4.0, 11.7), "inside": ("mid", 3.2, 6.6), "layers": ("mid", 6.4, 10.5)}
+JOINS = ["fadeblack", "fade"]    # the race's crowns to the block dip through black
+POSTER = ("end", 15.5)           # in film_bonsai time: the crowns, the extra blossoms in blue, "1.34× faster." and the URL
 MUSIC0 = 3.0                     # the bed's swell (its 23 s on) then lands on the crowns
 
 
@@ -93,8 +92,8 @@ def cut(files):
 
 
 @app.local_entrypoint()
-def main(trees: str = "", opening: str = "", mid: str = "", music: str = "", out: str = "."):
-    files = {k: open(p, "rb").read() for k, p in (("trees.mp4", trees), ("open.mp4", opening), ("mid.mp4", mid), ("music.wav", music))}
+def main(bonsai: str = "", mid: str = "", music: str = "", out: str = "."):
+    files = {k: open(p, "rb").read() for k, p in (("bonsai.mp4", bonsai), ("mid.mp4", mid), ("music.wav", music))}
     b = cut.remote(files)
     os.makedirs(out, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(b)) as tf:

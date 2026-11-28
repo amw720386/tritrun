@@ -215,14 +215,27 @@ def frame(t):
         pg["blue"].set(cb, sb)
     # camera
     if t < CUT:
-        keys = [(0.0, hc + Vector((-0.95, -1.75, 1.55))), (3.3, hc + Vector((-0.1, -2.5, 1.8))), (6.2, hc + Vector((0.5, -3.15, 2.25))),
-                (PULL0, hc + Vector((0.55, -3.25, 2.35))), (8.0, Vector((-9, -17, 10))), (PULL1, Vector((-22, -31, 13))), (CUT, Vector((-24, -33, 13.5)))]
-        ats = [(0.0, hc + Vector((0, 0.05, -0.12))), (3.3, hc + Vector((0.5, 0.05, -0.15))), (6.2, hc + Vector((0.85, 0.05, -0.2))),
-               (PULL0, hc + Vector((0.85, 0.05, -0.2))), (8.0, Vector((0, 0, -5.5))), (PULL1, Vector((0, 0, -10.5))), (CUT, Vector((0, 0, -10.8)))]
-        kit.look(cam, kit.path(t, keys), kit.path(t, ats))
+        # square and centred: a long lens from high in front, so the block's rows stay level and nothing is stretched;
+        # first the block alone, then the block and its four tokens, then the whole tower. The frame sits a little
+        # high (shift_y) to leave the caption room.
+        def front(at, d, el=math.radians(54)):
+            return at + Vector((0, -d * math.cos(el), d * math.sin(el)))
+        both = hc + Vector((0.72, 0, 0))
+        mid_ = Vector((0, 0, -LAYERS * GAP / 2))
+        if t < PULL0:                   # straight-on the whole time: only the aim and the distance move
+            m = kit.ramp(t, 2.8, 0.9)
+            at = hc.lerp(both, m)
+            kit.look(cam, front(at, kit.lerp(4.0, 4.3, kit.clamp(t / 2.8)) + m * 2.0 + 0.4 * kit.clamp((t - 3.7) / (PULL0 - 3.7))), at)
+        else:
+            keys = [(PULL0, front(both, 6.7)), (8.0, mid_ + Vector((-13, -26, 18))), (PULL1, mid_ + Vector((-26, -43, 25))),
+                    (CUT, mid_ + Vector((-27, -45, 26)))]
+            ats = [(PULL0, both), (8.0, mid_ * 0.6), (PULL1, mid_), (CUT, mid_)]
+            kit.look(cam, kit.path(t, keys), kit.path(t, ats))
+        cam.data.lens, cam.data.shift_y = 60, -0.07
     else:
         loc = kit.path(t, [(CUT, (RACE_X - 0.5, -27.5, 4.6)), (DURATION, (RACE_X + 0.3, -26.2, 4.3))])
         kit.look(cam, loc, Vector((RACE_X, 0, 3.7)))
+        cam.data.lens, cam.data.shift_y = 50, 0.0
     return {"fork": (S["pages"]["fork"]["ox"] + PAGE_W / 2, 0, 9.75), "ours": (S["pages"]["ours"]["ox"] + PAGE_W / 2, 0, 9.75)}
 
 
@@ -237,8 +250,8 @@ def _fade(t, a, b, d=0.35):
 
 
 CUT, RACE0, RACE_LEN = 10.6, 10.9, 4.0       # repeated: the overlay runs on its own
-POSTER = 15.2
-CLIPS = {"inside": (3.2, 6.6, 720), "layers": (6.4, 10.5, 720), "against": (10.6, 15.2, 720)}
+POSTER = 9.6
+CLIPS = {"inside": (3.2, 6.6, 720), "layers": (6.4, 10.5, 720)}
 MUTED = "#9aa5b6"
 
 

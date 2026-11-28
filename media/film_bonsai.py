@@ -1,15 +1,13 @@
-"""The bonsai scenes of the launch video: the race of the two trees opens it, the title follows, and the two crowns
-close it (media/edit.py cuts them around media/film.py). Rates come
-from results/release.json; the layer count and block size from src/engine.cu. The trits are drawn uniformly, like the
-real ones, but are not the file's.
+"""The bonsai scenes of the launch video: the title, the race of the two trees, and the two crowns that close it
+(media/edit.py cuts film.py's explainer in after the race). Rates come from results/release.json; the layer count from
+src/engine.cu.
 
-    modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 6.4
-    modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080 --t0 15.4 --t1 26.5
+    modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080
 
- 0.0  one bonsai in a shallow pot, the title; tokens open on it as blossoms, one per step
- 4.6  fly into one twig: a block of 128 leaves, each -1 (down), 0 (absent) or +1 (up)   [the video cuts to film.py here]
-15.0  two bonsai on one RTX 5090, a blossom per token at the measured rates, in real time, for 5 s
-21.4  the two crowns after the same 5 s; what ours made beyond the fork's count turns blue
+ 0.0  one bonsai in a shallow pot, the title; blossoms open on it, then fold away
+ 4.0  the tree clones into two that slide apart: PrismML's llama.cpp fork on the left, tritrun on the right
+ 6.0  both on one RTX 5090, a blossom per token at the measured rates, in real time, for 5 s
+11.7  the two crowns after the same 5 s; what ours made beyond the fork's count turns blue, then the repository
 """
 import math
 
@@ -21,19 +19,15 @@ try:
 except ImportError:          # the overlay runs without Blender
     kit = None
 
-DURATION = 27.0
+DURATION = 17.0
 S = {}
 LAYERS, BLOCK = 64, 128          # src/engine.cu: NL = 64 (every 4th layer is attention), 128-weight trit blocks
 TWIGS = 7                        # twigs per branch pad (illustrative)
 SLOTS = 1800                     # blossom places on a crown
-DRAFTS = 3
-SWEEP0, SWEEP1 = 6.45, 7.75      # the twig is read
-BUDS, PRUNE = 7.95, 9.15         # four buds open together; one draft is rejected
-PASSES = (12.0, 13.55)          # two steps climb the 64 layers
-PASS = 1.2
-CUT = 15.0
-RACE0, RACE_LEN = 15.7, 5.0
-END = 21.4
+SPLIT0, SPLIT1 = 4.0, 5.5        # the one tree becomes two
+CUT = SPLIT0
+RACE0, RACE_LEN = 6.0, 5.0
+END = 11.7
 RACE_X = 1.42                    # fork on the left, ours on the right
 
 
@@ -375,10 +369,8 @@ def show(o, on):
 
 
 def blossoms(t):
-    """Blossoms on the first tree: (count, newest-first ages)."""
-    times = [-1.0 + 0.35 * k for k in range(4)] + [0.18 + 0.27 * k for k in range(16)]
-    for p in PASSES:
-        times += [p + PASS + 0.02 * k for k in range(DRAFTS)]
+    """Ages of the blossoms on the title's tree."""
+    times = [-1.0 + 0.35 * k for k in range(4)] + [0.18 + 0.27 * k for k in range(12)]
     return [t - x for x in times if x <= t]
 
 
@@ -405,90 +397,28 @@ def frame(t):
         show(S[k], False)
     for k in ("buds_b", "buds_w", "buds_x", "bl_w", "bl_b"):
         show(S[k].o, not race)
-    inside = 4.4 < t < 11.6
-    H, out = Vector(S["H"]), S["out"]
     if not race:
-        # blossoms on the one tree
+        # blossoms on the one tree, which fold away before it splits
+        g = 1 - kit.ramp(t, 3.35, 0.55)
         ages = blossoms(t)
         sl = S["slots"]
-        w = [(sl[k], 0.034 * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a >= 0.30]
-        b = [(sl[k], 0.034 * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a < 0.30]
+        w = [(sl[k], 0.034 * g * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a >= 0.30]
+        b = [(sl[k], 0.034 * g * kit.ease(a / 0.12)) for k, a in enumerate(ages) if a < 0.30]
         S["bl_w"].set([x[0] for x in w], [x[1] for x in w])
         S["bl_b"].set([x[0] for x in b], [x[1] for x in b])
-        # the twig being read
-        if inside:
-            show(tree["hero_static"], False)
-            u = kit.clamp((t - SWEEP0) / (SWEEP1 - SWEEP0))
-            n = int(round(u * BLOCK)) if t < BUDS + 0.05 and t >= SWEEP0 else 0
-            Lv = S["Lv"]
-            far = np.full_like(Lv, -400.0)
-            lit = np.arange(BLOCK) < n
-            S["hleaf"].data.vertices.foreach_set("co", np.where(lit[:, None, None], far, Lv).astype("f4").ravel())
-            S["hleaf_b"].data.vertices.foreach_set("co", np.where(lit[:, None, None], Lv, far).astype("f4").ravel())
-            S["hleaf"].data.update()
-            S["hleaf_b"].data.update()
-            show(S["hleaf"], n < BLOCK)
-            show(S["hleaf_b"], n > 0)
-            stem_lit = SWEEP0 <= t < BUDS + 0.05
-            show(S["hstem"], not stem_lit)
-            show(S["hstem_b"], stem_lit)
-            # buds: open together, then the last draft is pruned and drops; the rest stay
-            g = kit.ease((t - BUDS) / 0.35)
-            bp, r = S["bud_pos"], S["bud_r"]
-            if t < PRUNE:
-                S["buds_b"].set(bp, [r * g] * 4)
-                S["buds_w"].set([], [])
-                S["buds_x"].set([], [])
-            else:
-                S["buds_b"].set([], [])
-                S["buds_w"].set(bp[:3], [r] * 3)
-                fall = t - PRUNE - 0.25
-                p = np.array(bp[3]) - [0, 0, 0.5 * 9.8 * 0.05 * max(0.0, fall) ** 2]
-                S["buds_x"].set([p], [r * (1 - kit.ramp(t, PRUNE + 0.3, 1.0))])
-        else:
-            for k in ("buds_b", "buds_w", "buds_x"):
-                S[k].set([], [])
-            if t >= PRUNE:
-                S["buds_w"].set(S["bud_pos"][:3], [S["bud_r"]] * 3)
-        # a step climbs the layers
-        for p in PASSES:
-            u = (t - p) / PASS
-            if 0 <= u < 1.05:
-                head = u * (LAYERS + 6)
-                for i in range(LAYERS):
-                    on = 0 <= head - i < 6
-                    if on:
-                        show(tree["branch"][i], False)
-                        show(tree["pad"][i], False)
-                        if i == S["hero"]:
-                            show(tree["hero_static"], False)
-                        for o in tree["blue"][i]:
-                            show(o, True)
-        # light
-        cut = kit.ramp(t, 4.5, 1.6) * (1 - kit.ramp(t, 10.3, 1.1))
-        S["cclay"].node_tree.nodes["CLIP"].outputs[0].default_value = kit.lerp(-1.7, S["H"][1] - 0.03, cut) if cut > 0 else -99
-        for o, c in S["base_col"]:          # while the twig is read, the idle tree goes dark
-            o.color = tuple(x * (1 - 0.72 * cut) for x in c[:3]) + (1,)
-        near = 1 - kit.ramp(t, 4.6, 1.4) + kit.ramp(t, 10.2, 1.4)
-        near = kit.clamp(near)
-        cl = 1 - near
-        L["back"].data.energy, L["rim"].data.energy, L["top"].data.energy, L["fill"].data.energy = 520 * near, 300 * near, 150 * near, 18 * near
-        L["in"].data.energy, L["inf"].data.energy = 34 * cl, 5 * cl
-        # camera
-        cin = H + out * 0.78 + Vector((0, 0, 0.20))
-        cin2 = H + out * 0.66 + Vector(S["Hd"]) * 0.05 + Vector((0, 0, 0.16))
-        keys = [(0, (0.0, -5.6, 1.45)), (4.0, (0.0, -5.0, 1.33)), (6.4, tuple(cin)), (10.2, tuple(cin2)), (12.4, (1.9, -5.5, 1.5)), (CUT, (2.5, -6.2, 1.35))]
-        ats = [(0, (0.0, 0, 0.9)), (4.0, (0.0, 0, 0.92)), (6.4, tuple(H - Vector((0, 0, 0.03)))), (10.2, tuple(H + Vector(S["Hd"]) * 0.04 - Vector((0, 0, 0.03)))), (12.4, (-0.42, 0, 1.12)), (CUT, (-0.5, 0, 1.16))]
-        kit.look(cam, hpath(t, keys), hpath(t, ats))
-        cam.data.lens = 50
-        cam.data.clip_start = 0.01
+        for k in ("buds_b", "buds_w", "buds_x"):
+            S[k].set([], [])
     else:
         fork, ours = rate(S["data"])
         el = kit.clamp(t - RACE0, 0, RACE_LEN)
         sl = S["slots"]
+        u = kit.ramp(t, SPLIT0, SPLIT1 - SPLIT0)
         for r, tps in zip(S["race"], (fork, ours)):
+            x = r["x"] * u                      # both copies start where the one tree stood, and slide apart
+            for o in r["objs"]:
+                o.location = (x, 0, 0)
             n = int(tps * el)
-            off = np.array([r["x"], 0, 0])
+            off = np.array([x, 0, 0])
             # each token's blossom: when it was made, at the measured average rate
             k = np.arange(n)
             age = el - k / tps if n else np.zeros(0)
@@ -501,14 +431,18 @@ def frame(t):
                 fresh = fresh | (k >= int(fork * RACE_LEN))
             r["w"].set(sl[k[~fresh]] + off, sz[~fresh])
             r["f"].set(sl[k[fresh]] + off, sz[fresh])
-            anchors["fork" if r["x"] < 0 else "ours"] = (r["x"], 0, 2.55)
-        on = kit.ramp(t, CUT, 0.3)
-        L["rback"].data.energy, L["rl"].data.energy, L["rr"].data.energy = 900 * on, 260 * on, 260 * on
-        L["rtop"].data.energy, L["rfill"].data.energy = 380 * on, 60 * on
-        loc = kit.path(t, [(CUT, (0.0, -6.3, 1.8)), (END, (0.0, -5.9, 1.7)), (DURATION, (0.0, -5.6, 1.75))])
-        at = kit.path(t, [(CUT, (0, 0, 1.08)), (END, (0, 0, 1.05)), (DURATION, (0, 0, 1.0))])
-        kit.look(cam, loc, at)
-        cam.data.lens = 34
+            anchors["fork" if r["x"] < 0 else "ours"] = (x, 0, 2.55)
+    # light: the one tree's rig hands over to the pair's while they split
+    v = kit.ramp(t, SPLIT0, SPLIT1 - SPLIT0)
+    L["back"].data.energy, L["rim"].data.energy, L["top"].data.energy, L["fill"].data.energy = 520 * (1 - v), 300 * (1 - v), 150 * (1 - v), 18 * (1 - v)
+    L["rback"].data.energy, L["rl"].data.energy, L["rr"].data.energy = 900 * v, 260 * v, 260 * v
+    L["rtop"].data.energy, L["rfill"].data.energy = 380 * v, 60 * v
+    # camera: one centred path from the title's close framing out to the pair
+    keys = [(0, (0.0, -5.6, 1.45)), (SPLIT0, (0.0, -5.15, 1.36)), (SPLIT1, (0.0, -6.3, 1.8)), (END, (0.0, -5.9, 1.7)), (DURATION, (0.0, -5.6, 1.75))]
+    ats = [(0, (0.0, 0, 0.9)), (SPLIT0, (0.0, 0, 0.92)), (SPLIT1, (0.0, 0, 1.08)), (END, (0.0, 0, 1.05)), (DURATION, (0.0, 0, 1.0))]
+    kit.look(cam, hpath(t, keys), hpath(t, ats))
+    cam.data.lens = kit.lerp(50, 34, v)
+    cam.data.clip_start = 0.01
     return anchors
 
 
@@ -522,8 +456,8 @@ def _fade(t, a, b, d=0.4):
     return _e((t - a) / d) * (1 - _e((t - b + d) / d))
 
 
-CUT, RACE0, RACE_LEN, END = 15.0, 15.7, 5.0, 21.4     # repeated: the overlay runs on its own
-POSTER = 3.0
+SPLIT0, SPLIT1, RACE0, RACE_LEN, END = 4.0, 5.5, 6.0, 5.0, 11.7     # repeated: the overlay runs on its own
+POSTER = 15.5
 CLIPS = {}
 MUTED = "#9aa5b6"
 
@@ -532,15 +466,15 @@ def overlay(t, pts, data):
     d = {r["gpu"]: r for r in data["decode"]}["RTX 5090"]
     fork, ours = d["fork_mtp"], d["ours_mtp"]
     out = []
-    if t < 10:
-        k = _fade(t, 0.6, 4.7, 0.5)
+    if t < SPLIT0 + 0.2:
+        k = _fade(t, 0.6, 3.9, 0.5)
         out.append({"text": "INTRODUCING", "x": 0.5, "y": 0.775, "size": 28, "mono": True, "color": MUTED, "anchor": "c", "a": k})
         out.append({"text": "tritrun", "x": 0.5, "y": 0.855, "size": 128, "anchor": "c", "a": k})
         out.append({"text": "An inference engine for Ternary Bonsai 2.5 27B", "x": 0.5, "y": 0.935, "size": 30,
-                    "weight": "Regular", "color": MUTED, "anchor": "c", "a": _fade(t, 1.1, 4.7, 0.5)})
+                    "weight": "Regular", "color": MUTED, "anchor": "c", "a": _fade(t, 1.1, 3.9, 0.5)})
     else:
         el = max(0.0, min(RACE_LEN, t - RACE0))
-        k = _e((t - CUT - 0.05) / 0.3)
+        k = _e((t - SPLIT1 + 0.3) / 0.4)
         for key, name, tps in (("fork", "PrismML's llama.cpp fork", fork), ("ours", "tritrun", ours)):
             if key in pts:
                 x, y = pts[key]
