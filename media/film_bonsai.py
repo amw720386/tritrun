@@ -1,9 +1,10 @@
-"""The bonsai scenes that open and close the launch video (media/edit.py cuts them around media/film.py). Rates come
+"""The bonsai scenes of the launch video: the race of the two trees opens it, the title follows, and the two crowns
+close it (media/edit.py cuts them around media/film.py). Rates come
 from results/release.json; the layer count and block size from src/engine.cu. The trits are drawn uniformly, like the
 real ones, but are not the file's.
 
     modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 6.4
-    modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080 --t0 20.4 --t1 26.5
+    modal run <toolkit>/film/render_modal.py --film media/film_bonsai.py --data results/release.json --out <dir> --w 1080 --h 1080 --t0 15.4 --t1 26.5
 
  0.0  one bonsai in a shallow pot, the title; tokens open on it as blossoms, one per step
  4.6  fly into one twig: a block of 128 leaves, each -1 (down), 0 (absent) or +1 (up)   [the video cuts to film.py here]
@@ -476,8 +477,8 @@ def frame(t):
         # camera
         cin = H + out * 0.78 + Vector((0, 0, 0.20))
         cin2 = H + out * 0.66 + Vector(S["Hd"]) * 0.05 + Vector((0, 0, 0.16))
-        keys = [(0, (1.35, -5.6, 1.45)), (4.0, (0.95, -5.0, 1.33)), (6.4, tuple(cin)), (10.2, tuple(cin2)), (12.4, (1.9, -5.5, 1.5)), (CUT, (2.5, -6.2, 1.35))]
-        ats = [(0, (-0.5, 0, 0.9)), (4.0, (-0.45, 0, 0.92)), (6.4, tuple(H - Vector((0, 0, 0.03)))), (10.2, tuple(H + Vector(S["Hd"]) * 0.04 - Vector((0, 0, 0.03)))), (12.4, (-0.42, 0, 1.12)), (CUT, (-0.5, 0, 1.16))]
+        keys = [(0, (0.0, -5.6, 1.45)), (4.0, (0.0, -5.0, 1.33)), (6.4, tuple(cin)), (10.2, tuple(cin2)), (12.4, (1.9, -5.5, 1.5)), (CUT, (2.5, -6.2, 1.35))]
+        ats = [(0, (0.0, 0, 0.9)), (4.0, (0.0, 0, 0.92)), (6.4, tuple(H - Vector((0, 0, 0.03)))), (10.2, tuple(H + Vector(S["Hd"]) * 0.04 - Vector((0, 0, 0.03)))), (12.4, (-0.42, 0, 1.12)), (CUT, (-0.5, 0, 1.16))]
         kit.look(cam, hpath(t, keys), hpath(t, ats))
         cam.data.lens = 50
         cam.data.clip_start = 0.01
@@ -504,8 +505,8 @@ def frame(t):
         on = kit.ramp(t, CUT, 0.3)
         L["rback"].data.energy, L["rl"].data.energy, L["rr"].data.energy = 900 * on, 260 * on, 260 * on
         L["rtop"].data.energy, L["rfill"].data.energy = 380 * on, 60 * on
-        loc = kit.path(t, [(CUT, (-0.4, -7.6, 2.2)), (END, (0.1, -7.0, 2.0)), (DURATION, (0.25, -6.7, 2.25))])
-        at = kit.path(t, [(CUT, (0, 0, 1.12)), (END, (0, 0, 1.12)), (DURATION, (0.05, 0, 1.02))])
+        loc = kit.path(t, [(CUT, (0.0, -6.3, 1.8)), (END, (0.0, -5.9, 1.7)), (DURATION, (0.0, -5.6, 1.75))])
+        at = kit.path(t, [(CUT, (0, 0, 1.08)), (END, (0, 0, 1.05)), (DURATION, (0, 0, 1.0))])
         kit.look(cam, loc, at)
         cam.data.lens = 34
     return anchors
@@ -521,6 +522,7 @@ def _fade(t, a, b, d=0.4):
     return _e((t - a) / d) * (1 - _e((t - b + d) / d))
 
 
+CUT, RACE0, RACE_LEN, END = 15.0, 15.7, 5.0, 21.4     # repeated: the overlay runs on its own
 POSTER = 3.0
 CLIPS = {}
 MUTED = "#9aa5b6"
@@ -537,17 +539,23 @@ def overlay(t, pts, data):
         out.append({"text": "An inference engine for Ternary Bonsai 2.5 27B", "x": 0.5, "y": 0.935, "size": 30,
                     "weight": "Regular", "color": MUTED, "anchor": "c", "a": _fade(t, 1.1, 4.7, 0.5)})
     else:
-        k = _e((t - 20.6) / 0.4)
-        for key, name in (("fork", "PrismML's llama.cpp fork"), ("ours", "tritrun")):
+        el = max(0.0, min(RACE_LEN, t - RACE0))
+        k = _e((t - CUT - 0.05) / 0.3)
+        for key, name, tps in (("fork", "PrismML's llama.cpp fork", fork), ("ours", "tritrun", ours)):
             if key in pts:
                 x, y = pts[key]
-                out.append({"text": name, "x": x, "y": y - 0.03, "size": 32, "weight": "Regular", "anchor": "c", "a": k,
-                            "color": "#e8edf4" if key == "ours" else "#a3afc0"})
-        k = _fade(t, 20.9, 22.3, 0.35)
-        out.append({"text": "A BLOSSOM PER TOKEN, 5 SECONDS", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": k})
-        out.append({"text": "The same race, on the trees.", "x": 0.06, "y": 0.88, "size": 64, "a": k})
-        a = _e((t - 22.4) / 0.45)
+                o = key == "ours"
+                out.append({"text": name, "x": x, "y": y - 0.075, "size": 32, "weight": "Regular", "anchor": "c", "a": k,
+                            "color": "#e8edf4" if o else "#a3afc0"})
+                out.append({"text": f"{int(tps * el):,} tokens", "x": x, "y": y - 0.02, "size": 46, "anchor": "c", "a": k, "tnum": True,
+                            "color": "#3b82f6" if o and el > 0 else "#e8edf4" if o else "#a3afc0"})
+        out.append({"text": f"{el:.2f} s", "x": 0.5, "y": 0.05, "size": 34, "anchor": "c", "a": k, "tnum": True})
+        b = 1 - _e((t - END - 0.1) / 0.35)         # the race's caption, then the closing card
+        out.append({"text": "SAME RTX 5090, SAME 27B MODEL", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": k * b})
+        out.append({"text": f"tritrun: {ours / fork:.2f}× faster.", "x": 0.06, "y": 0.88, "size": 64, "a": k * b})
+        out.append({"text": "A blossom per token, in real time.", "x": 0.06, "y": 0.94, "size": 26, "weight": "Regular", "color": MUTED, "a": k * b})
+        a = _e((t - END - 0.5) / 0.45)
         out.append({"text": "TRITRUN, OPEN SOURCE", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": a})
         out.append({"text": f"{ours / fork:.2f}× faster.", "x": 0.06, "y": 0.88, "size": 64, "a": a})
-        out.append({"text": "github.com/amw720386/tritrun", "x": 0.06, "y": 0.94, "size": 26, "weight": "Regular", "color": MUTED, "a": _e((t - 23.0) / 0.45)})
+        out.append({"text": "github.com/amw720386/tritrun", "x": 0.06, "y": 0.94, "size": 26, "weight": "Regular", "color": MUTED, "a": _e((t - END - 1.0) / 0.45)})
     return out

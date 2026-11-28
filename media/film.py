@@ -1,19 +1,18 @@
-"""The explainer of the launch video, square. Its race opens the video, and its block and layers follow the bonsai
-title (media/edit.py cuts it with the scenes of media/film_bonsai.py). Rates come from results/release.json (built from the logs by tools/release_numbers.py);
+"""The explainer of the launch video, square: its block and layers follow the bonsai title (media/edit.py cuts it with
+the scenes of media/film_bonsai.py). Its race of two pages, from 10.6, is not in the cut; the trees race instead. Rates come from results/release.json (built from the logs by tools/release_numbers.py);
 the layer count and block size from src/engine.cu. The trits on screen are drawn uniformly, like the real ones, but are
 not the file's, and the token widths on the two pages are illustrative (both pages show the same sequence, as greedy
 decoding of one model file does).
 
     python tools/release_numbers.py
-    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t0 10.6 --t1 16.3   # the race
-    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 10.6               # the block and layers
+    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 10.6
 
  0.0  one block of 128 weights: +1 stands up, 0 lies flat, -1 sinks
  3.4  a read sweeps the block once, and four tokens light together (one token and three drafts)
  6.6  pull back: the block is one of many in a layer, and every step reads all 64 layers
-10.6  (the video opens here) the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
+10.6  the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
 14.9  the race ends; the counts hold and the ratio comes up
-16.3  (the video cuts to the bonsai title here)
+16.3  end
 """
 import math
 

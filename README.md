@@ -19,11 +19,11 @@ tritrun is a standalone CUDA inference engine for PrismML's
 27B model fits on a 16 GB T4. It is aimed at the small and mid-range cards where decode is limited by memory bandwidth, and it
 is compared with PrismML's own llama.cpp fork, the only other engine that runs this file on NVIDIA, at the fork's best settings.
 
-[![Launch video: both engines decode the same text on one RTX 5090 in real time, 965 tokens against 1,294 after 4 seconds, and tritrun comes up 1.34× faster; then the title over a bonsai, and into one twig whose leaves become a block of 128 ternary weights, +1 standing, 0 flat and -1 sunk; the block is read once and four tokens light together; the camera pulls back to the 64 layers a step reads; it ends on the two bonsai, a blossom per token](assets/launch-poster.jpg)](assets/launch.mp4)
+[![Launch video: two bonsai on one RTX 5090, one for each engine, open a blossom per token at the measured rates in real time; after 5 seconds PrismML's fork has 1,207 and tritrun 1,618, 1.34× faster. Then the title over one bonsai, and into one twig whose leaves become a block of 128 ternary weights, +1 standing, 0 flat and -1 sunk; the block is read once and four tokens light together; the camera pulls back to the 64 layers a step reads; it ends on the two crowns, tritrun's extra blossoms in blue](assets/launch-poster.jpg)](assets/launch.mp4)
 
-*Launch video (26 s, with sound). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and both races run in real time at each engine's average rate. The bonsai, the trit values, the token widths and the pace of the first shots are illustrative. Made with [`media/edit.py`](media/edit.py) from [`media/film_bonsai.py`](media/film_bonsai.py) and [`media/film.py`](media/film.py).*
+*Launch video (26 s, with sound). Click to play. The 128-weight block, the 64 layers and the two decode rates are the real ones, and the race runs in real time at each engine's average rate. The bonsai, the trit values and the pace of the explainer shots are illustrative. Made with [`media/edit.py`](media/edit.py) from [`media/film_bonsai.py`](media/film_bonsai.py) and [`media/film.py`](media/film.py).*
 
-<p align="center"><img src="assets/against.gif" width="720" alt="Both engines decode the same text on one RTX 5090, a tile per token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 965 and 1,294 tokens after 4 seconds"></p>
+<p align="center"><img src="assets/against.gif" width="720" alt="Two bonsai on one RTX 5090 open a blossom per token: the PrismML llama.cpp fork at 241.4 tokens per second and tritrun at 323.6, reaching 1,207 and 1,618 tokens after 5 seconds"></p>
 
 *Decode with 3 MTP drafts on an RTX 5090, in real time at each engine's measured average rate.*
 

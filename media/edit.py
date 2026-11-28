@@ -1,14 +1,15 @@
 """Cut the launch video from its four renders and the music bed, on Modal.
 
-    modal run media/edit.py --race <dir>/film.mp4 --opening <dir>/film.mp4 --mid <dir>/film.mp4 --end <dir>/film.mp4 --music bed.wav --out <dir>
+    modal run media/edit.py --trees <dir>/film.mp4 --opening <dir>/film.mp4 --mid <dir>/film.mp4 --music bed.wav --out <dir>
 
-race  media/film.py        10.6 to 16.3  both engines decode the same text on one RTX 5090, then "1.34× faster"
-open  media/film_bonsai.py  0.0 to 6.4   the title over the bonsai, and the flight into one twig
+race  media/film_bonsai.py 15.4 to 22.0  two bonsai on one RTX 5090, a blossom per token at each engine's rate, 5 s
+open  media/film_bonsai.py  0.0 to 6.4   the title over one bonsai, and the flight into one twig
 mid   media/film.py         0.6 to 10.5  the block read once for four tokens, and the 64 layers
-end   media/film_bonsai.py 20.4 to 26.5  the two crowns, the ratio and the repository
+end   media/film_bonsai.py 22.0 to 26.5  back on the two crowns: tritrun's extra blossoms, the ratio and the repository
 
-The race comes first so the first five seconds show the result to anyone who scrolls past. Each part joins the next
-with a 0.6 s dissolve. The music is set to a constant gain (two-pass loudness, linear), so it never pumps, and fades
+The trees' race comes first so the first five seconds show the result to anyone who scrolls past. --trees is one
+render of film_bonsai.py from 15.4 to 26.5; --opening from 0 to 6.4; --mid of film.py from 0 to 10.6. Each part joins the next
+with a 0.6 s dissolve, the first through black. The music is set to a constant gain (two-pass loudness, linear), so it never pumps, and fades
 out with the picture. The bed is ACE-Step (Apache-2.0), seed 101 of the prompt in media/music.py.
 """
 import io
@@ -20,11 +21,12 @@ import modal
 
 app = modal.App("launch-edit", image=modal.Image.debian_slim(python_version="3.11").apt_install("ffmpeg"))
 X = 0.6
-# each part's span in its own file's time (race.mp4 starts at the film's 10.6, end.mp4 at 20.4)
-PARTS = [("race", 0.0, None), ("open", 0.0, None), ("mid", 0.6, 10.5), ("end", 0.0, None)]
-CLIPS = {"against": ("race", 0.0, 5.7), "inside": ("mid", 3.2, 6.6), "layers": ("mid", 6.4, 10.5)}
-POSTER = ("end", 4.2)            # the crowns with "1.34× faster."
-MUSIC0 = 3.5                     # the bed's swell (its 23 s on) then lands on the crowns
+# (part, file, span in that file's own time); trees.mp4 starts at the film's 15.4
+PARTS = [("race", "trees", 0.0, 6.6), ("open", "open", 0.0, None), ("mid", "mid", 0.6, 10.5), ("end", "trees", 6.6, None)]
+CLIPS = {"against": ("race", 0.0, 6.6), "inside": ("mid", 3.2, 6.6), "layers": ("mid", 6.4, 10.5)}
+JOINS = ["fadeblack", "fade", "fade"]   # race to title dips through black: two small trees never ghost into one big one
+POSTER = ("end", 9.5)            # in trees.mp4 time: the crowns, the extra blossoms in blue, "1.34× faster." and the URL
+MUSIC0 = 3.0                     # the bed's swell (its 23 s on) then lands on the crowns
 
 
 @app.function(cpu=8, memory=8192, timeout=1200)
@@ -44,8 +46,8 @@ def cut(files):
     for k, b in files.items():
         open(f"/w/{k}", "wb").write(b)
     spans, start, at = [], {}, 0.0
-    for name, s, e in PARTS:
-        e = dur(f"/w/{name}.mp4") if e is None else e
+    for name, f, s, e in PARTS:
+        e = dur(f"/w/{f}.mp4") if e is None else e
         spans.append((name, s, e))
         start[name] = at - s                      # global time = start[name] + the part's own time
         at += e - s - X
@@ -59,10 +61,10 @@ def cut(files):
             prev, off = f"p{i}", e - s
         else:
             off -= X
-            vf.append(f"[{prev}][p{i}]xfade=transition=fade:duration={X}:offset={off:.3f}[x{i}]")
+            vf.append(f"[{prev}][p{i}]xfade=transition={JOINS[i - 1]}:duration={X}:offset={off:.3f}[x{i}]")
             prev, off = f"x{i}", off + e - s
     vf.append(f"[{prev}]fade=t=out:st={total - 0.8:.3f}:d=0.8[v]")
-    inputs = [a for name, _, _ in spans for a in ("-i", f"/w/{name}.mp4")]
+    inputs = [a for _, f, _, _ in PARTS for a in ("-i", f"/w/{f}.mp4")]
     ff(*inputs, "-filter_complex", ";".join(vf), "-map", "[v]", *enc, "/w/picture.mp4")
     # music: trim, fade, then a constant gain to -16 LUFS
     pre = f"atrim={MUSIC0}:{MUSIC0 + total:.3f},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.05,afade=t=out:st={total - 2.2:.3f}:d=2.2"
@@ -91,8 +93,8 @@ def cut(files):
 
 
 @app.local_entrypoint()
-def main(race: str = "", opening: str = "", mid: str = "", end: str = "", music: str = "", out: str = "."):
-    files = {k: open(p, "rb").read() for k, p in (("race.mp4", race), ("open.mp4", opening), ("mid.mp4", mid), ("end.mp4", end), ("music.wav", music))}
+def main(trees: str = "", opening: str = "", mid: str = "", music: str = "", out: str = "."):
+    files = {k: open(p, "rb").read() for k, p in (("trees.mp4", trees), ("open.mp4", opening), ("mid.mp4", mid), ("music.wav", music))}
     b = cut.remote(files)
     os.makedirs(out, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(b)) as tf:
