@@ -1,18 +1,19 @@
-"""The explainer at the middle of the launch video, square (media/edit.py cuts it between the bonsai scenes of
-media/film_bonsai.py). Rates come from results/release.json (built from the logs by tools/release_numbers.py);
+"""The explainer of the launch video, square. Its race opens the video, and its block and layers follow the bonsai
+title (media/edit.py cuts it with the scenes of media/film_bonsai.py). Rates come from results/release.json (built from the logs by tools/release_numbers.py);
 the layer count and block size from src/engine.cu. The trits on screen are drawn uniformly, like the real ones, but are
 not the file's, and the token widths on the two pages are illustrative (both pages show the same sequence, as greedy
 decoding of one model file does).
 
     python tools/release_numbers.py
-    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 16.2
+    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t0 10.6 --t1 16.3   # the race
+    modal run <toolkit>/film/render_modal.py --film media/film.py --data results/release.json --out <dir> --w 1080 --h 1080 --t1 10.6               # the block and layers
 
  0.0  one block of 128 weights: +1 stands up, 0 lies flat, -1 sinks
  3.4  a read sweeps the block once, and four tokens light together (one token and three drafts)
  6.6  pull back: the block is one of many in a layer, and every step reads all 64 layers
-10.6  cut: the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
-14.9  the race ends; the counts hold
-16.2  (the video cuts back to the bonsai here)
+10.6  (the video opens here) the same text decoded on one RTX 5090 by both engines, a tile per token at the measured rates, in real time
+14.9  the race ends; the counts hold and the ratio comes up
+16.3  (the video cuts to the bonsai title here)
 """
 import math
 
@@ -265,5 +266,8 @@ def overlay(t, pts, data):
                 out.append({"text": f"{int(tps * el):,} tokens", "x": x, "y": y - 0.005, "size": 46, "anchor": "c", "a": k, "tnum": True,
                             "color": "#3b82f6" if o and el > 0 else "#e8edf4" if o else "#a3afc0"})
         out.append({"text": f"{el:.2f} s", "x": 0.5, "y": 0.04, "size": 34, "anchor": "c", "a": k, "tnum": True})
-        say(CUT, 16.2, "SAME RTX 5090, SAME MODEL FILE", "Both, in real time.")
+        end = RACE0 + RACE_LEN                # the label stays; the line under it turns into the ratio
+        out.append({"text": "SAME RTX 5090, SAME 27B MODEL", "x": 0.06, "y": 0.81, "size": 28, "mono": True, "color": MUTED, "a": k})
+        out.append({"text": "Both decoding, in real time.", "x": 0.06, "y": 0.88, "size": 64, "a": k * (1 - _e((t - end + 0.1) / 0.25))})
+        out.append({"text": f"tritrun: {ours / fork:.2f}× faster.", "x": 0.06, "y": 0.88, "size": 64, "a": _e((t - end - 0.1) / 0.3)})
     return out

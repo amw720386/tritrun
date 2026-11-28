@@ -534,7 +534,7 @@ def overlay(t, pts, data):
         k = _fade(t, 0.6, 4.7, 0.5)
         out.append({"text": "INTRODUCING", "x": 0.5, "y": 0.775, "size": 28, "mono": True, "color": MUTED, "anchor": "c", "a": k})
         out.append({"text": "tritrun", "x": 0.5, "y": 0.855, "size": 128, "anchor": "c", "a": k})
-        out.append({"text": f"A Ternary Bonsai engine, {ours / fork:.2f}× faster than PrismML's", "x": 0.5, "y": 0.935, "size": 30,
+        out.append({"text": "An inference engine for Ternary Bonsai 2.5 27B", "x": 0.5, "y": 0.935, "size": 30,
                     "weight": "Regular", "color": MUTED, "anchor": "c", "a": _fade(t, 1.1, 4.7, 0.5)})
     else:
         k = _e((t - 20.6) / 0.4)
